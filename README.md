@@ -18,13 +18,33 @@ A high-performance, private metadata hub for **Kometa** and **Plex**. This servi
 ## 📂 Project Structure
 ```text
 /anidb-mirror
-├── data/               # Persistent XML cache (.xml files)
-├── main.py             # FastAPI service & relational background worker
-├── seed_db.py          # One-time tool to index existing XML collections
-├── update.sh           # Automated Git pull and Docker rebuild script
-├── backup.sh           # Daily AWS S3 synchronization script
-├── maintenance.html    # Custom page served during updates
-├── database.db         # SQLite data (Tags, Relations, Quota Logs)
-├── Caddyfile           # Reverse proxy & Auth configuration
-├── Dockerfile          # Python 3.11-slim container definition
-└── docker-compose.yml  # Multi-container orchestration
+├── data/                     # Persistent XML cache (.xml files)
+├── main.py                   # FastAPI service & relational background worker
+├── seed_db.py                # One-time tool to index existing XML collections
+├── update.sh                 # Automated Git pull and Docker rebuild script
+├── backup.sh                 # Daily local backups
+├── backup-spaces.sh          # DigitalOcean Spaces backup integration
+├── restore-spaces.sh         # Restore from Spaces backup
+├── deploy-digitalocean.sh    # Automated DigitalOcean deployment
+├── maintenance.html          # Custom page served during updates
+├── database.db               # SQLite data (Tags, Relations, Quota Logs)
+├── Caddyfile                 # Reverse proxy & Auth configuration
+├── Dockerfile                # Python 3.11-slim container definition
+├── docker-compose.yml        # Multi-container orchestration
+└── terraform/                # Infrastructure as Code
+    └── digitalocean/         # DigitalOcean Terraform configs
+```
+
+---
+
+## 🌐 Deployment Options
+
+### Quick Deploy
+- **[DigitalOcean](DIGITALOCEAN_DEPLOYMENT.md)** - $6/month, automated script available
+- **[AWS Free Tier](AWS_DEPLOYMENT.md)** - Free for 12 months, then ~$5-10/month
+- **[Oracle Cloud](ORACLE_DEPLOYMENT.md)** - Always free tier available
+
+### Infrastructure as Code
+- **[Terraform (DigitalOcean)](terraform/digitalocean/README.md)** - Automated infrastructure provisioning
+
+---

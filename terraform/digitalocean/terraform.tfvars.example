@@ -1,0 +1,45 @@
+# DigitalOcean Terraform Configuration
+# Copy this file to terraform.tfvars and update with your values
+
+# DigitalOcean API token (get from: https://cloud.digitalocean.com/account/api/tokens)
+do_token = "dop_v1_your_token_here"
+
+# Your SSH public key (e.g., contents of ~/.ssh/id_ed25519.pub)
+ssh_public_key = "ssh-ed25519 AAAAC3... your-email@example.com"
+
+# Droplet configuration
+droplet_name = "anidb-mirror"
+region       = "nyc3"  # Options: nyc1, nyc3, sfo3, ams3, sgp1, lon1, fra1, tor1, blr1
+droplet_size = "s-1vcpu-1gb"  # $6/month
+
+# Enable backups (+$1.20/month for basic droplet)
+enable_backups = true
+
+# SSH access restriction (list your IP or use ["0.0.0.0/0", "::/0"] for all)
+ssh_allowed_ips = ["0.0.0.0/0", "::/0"]
+
+# Domain configuration
+domain_name = "anidb-service.yourdomain.com"
+
+# DNS configuration (if using DigitalOcean DNS)
+create_dns_record = false
+dns_domain        = "yourdomain.com"
+dns_subdomain     = "anidb-service"
+
+# Reserved IP (static IP that survives droplet rebuilds)
+use_reserved_ip = false
+
+# DigitalOcean Spaces (S3-compatible storage) for backups
+create_spaces_bucket = true
+spaces_bucket_name   = "anidb-backups-yourname"  # Must be globally unique
+spaces_region        = "nyc3"  # Must match droplet region or nearby
+backup_retention_days = 30
+
+# Additional storage volume (optional, for large XML datasets)
+create_volume = false
+volume_size   = 10  # GB
+
+# Organization
+create_project = true
+environment    = "Production"
+tags           = ["anidb-service", "production"]

@@ -1,0 +1,50 @@
+# --- Python Specifics ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- Database & Cache (Crucial) ---
+# We ignore the local database and XML folder so your private 
+# AniDB data stays on your AWS server and doesn't leak to Git.
+database.db
+database.db-journal
+data/
+*.xml
+
+# --- Seed Data ---
+# Keep the directory structure but ignore large zip files
+seed_data/*.zip
+seed_data/*.xml
+
+# --- Credentials & Config ---
+# Even though we use Basic Auth in Caddy, don't track private env files.
+.env
+.venv
+venv/
+
+# --- Reverse Proxy (Caddy) ---
+# Ignore the generated SSL certificates and internal Caddy state.
+caddy_data/
+caddy_config/
+
+# --- OS Specifics ---
+.DS_Store
+Thumbs.db

@@ -1,0 +1,37 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: FastAPI",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": [
+                "main:app",
+                "--reload",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "8000"
+            ],
+            "jinja": true,
+            "justMyCode": false,
+            "env": {
+                "API_USER": "kometa_admin",
+                "API_PASS": "bingbangboing",
+                "XML_DIR": "/workspace/data",
+                "DB_PATH": "/workspace/database.db",
+                "SEED_DATA_DIR": "/workspace/seed_data",
+                "ANIDB_USERNAME": "kometaofficial",
+                "ANIDB_PASSWORD": "5651glhlz8g7f722",
+                "ANIDB_CLIENT": "kometaofficial",
+                "ANIDB_VERSION": "1",
+                "ANIDB_PROTO_VER": "1",
+                "DAILY_LIMIT": "200",
+                "THROTTLE_SECONDS": "4",
+                "UPDATE_THRESHOLD_DAYS": "7"
+            },
+            "console": "integratedTerminal"
+        }
+    ]
+}
