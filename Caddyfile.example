@@ -19,7 +19,11 @@ yourdomain.com {
     }
 
     # Handle /anidb-service path
+    # NOTE: uri strip_prefix removes /anidb-service before sending to backend
+    # FastAPI receives /stats instead of /anidb-service/stats
+    # Set ROOT_PATH=/anidb-service in .env so docs work correctly
     handle /anidb-service* {
+        uri strip_prefix /anidb-service
         reverse_proxy anidb-mirror:8000
     }
 
