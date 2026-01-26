@@ -397,13 +397,6 @@ async def root():
             <code>curl -u username:password "http://localhost:8000/search/tags?tags=action,comedy&min_weight=300"</code>
         </div>
         
-        <h2>Documentation</h2>
-        <ul>
-            <li><a href="/docs">Interactive API Docs (Swagger UI)</a></li>
-            <li><a href="/redoc">ReDoc Documentation</a></li>
-            <li><a href="/tags">Browse All Tags</a></li>
-        </ul>
-        
         <p style="margin-top: 40px; color: #666; font-size: 0.9em;">
             Powered by FastAPI | <a href="https://github.com">GitHub</a>
         </p>
