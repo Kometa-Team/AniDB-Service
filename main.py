@@ -22,6 +22,7 @@ SEED_DATA_DIR = Path(os.getenv("SEED_DATA_DIR", "/app/seed_data"))
 DAILY_LIMIT = int(os.getenv("DAILY_LIMIT", "200"))
 THROTTLE_SECONDS = int(os.getenv("THROTTLE_SECONDS", "4"))
 UPDATE_THRESHOLD = timedelta(days=int(os.getenv("UPDATE_THRESHOLD_DAYS", "14")))
+ROOT_PATH = os.getenv("ROOT_PATH", "")  # Set to /anidb-service for path-based routing
 
 # AniDB API Configuration
 ANIDB_CLIENT = os.getenv("ANIDB_CLIENT", "kometa")
@@ -315,7 +316,11 @@ async def lifespan(app: FastAPI):
             pass
 
 
-app = FastAPI(title="AniDB Mirror Service", lifespan=lifespan)
+app = FastAPI(
+    title="AniDB Mirror Service",
+    lifespan=lifespan,
+    root_path=ROOT_PATH
+)
 
 
 def authenticate(credentials: HTTPBasicCredentials = Depends(security)) -> str:

@@ -1,17 +1,25 @@
-anidb-service.kometa.wiki {
-    # Authentication is handled by FastAPI - no duplicate auth layer needed
-    
-    # Handle errors (like when the backend is down)
-    handle_errors {
-        @maintenance expression {err.status_code} in [502, 503, 504]
-        handle @maintenance {
-            rewrite * /maintenance.html
-            file_server {
-                root /var/www/html
+# Domain configuration - update yourdomain.com to your actual domain
+yourdomain.com {
+    # Handle /anidb-service path
+    handle_path /anidb-service* {
+        # Handle errors (like when the backend is down)
+        handle_errors {
+            @maintenance expression {err.status_code} in [502, 503, 504]
+            handle @maintenance {
+                rewrite * /maintenance.html
+                file_server {
+                    root /var/www/html
+                }
             }
         }
+
+        # Proxy to FastAPI backend
+        # The handle_path directive strips /anidb-service prefix before proxying
+        reverse_proxy anidb-mirror:8000
     }
 
-    # Proxy to FastAPI backend
-    reverse_proxy anidb-mirror:8000
+    # Optional: Handle root path for other services
+    # handle / {
+    #     respond "Welcome! Available services: /anidb-service"
+    # }
 }
