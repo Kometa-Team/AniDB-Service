@@ -47,19 +47,19 @@ case $choice in
         # Update Caddyfile
         cat > Caddyfile <<EOF
 ${DOMAIN} {
-    handle /${PATH_PREFIX}* {
-        uri strip_prefix /${PATH_PREFIX}
-        
-        handle_errors {
-            @maintenance expression {err.status_code} in [502, 503, 504]
-            handle @maintenance {
-                rewrite * /maintenance.html
-                file_server {
-                    root /var/www/html
-                }
+    # Handle errors (like when the backend is down)
+    handle_errors {
+        @maintenance expression {err.status_code} in [502, 503, 504]
+        handle @maintenance {
+            rewrite * /maintenance.html
+            file_server {
+                root /var/www/html
             }
         }
+    }
 
+    handle /${PATH_PREFIX}* {
+        uri strip_prefix /${PATH_PREFIX}
         reverse_proxy anidb-mirror:8000
     }
 

@@ -230,8 +230,6 @@ fi
 
 cat > Caddyfile <<EOF
 $DOMAIN_NAME {
-    # Authentication is handled by FastAPI - no duplicate auth layer needed
-    
     # Handle errors (like when the backend is down)
     handle_errors {
         @maintenance expression {err.status_code} in [502, 503, 504]
@@ -243,7 +241,7 @@ $DOMAIN_NAME {
         }
     }
 
-    # Proxy to FastAPI backend
+    # Authentication is handled by FastAPI
     reverse_proxy anidb-mirror:8000
 }
 EOF
