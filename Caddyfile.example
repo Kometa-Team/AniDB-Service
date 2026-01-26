@@ -20,7 +20,6 @@ yourdomain.com {
 
     # Handle /anidb-service path
     handle /anidb-service* {
-        uri strip_prefix /anidb-service
         reverse_proxy anidb-mirror:8000
     }
 

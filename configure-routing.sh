@@ -59,7 +59,6 @@ ${DOMAIN} {
     }
 
     handle /${PATH_PREFIX}* {
-        uri strip_prefix /${PATH_PREFIX}
         reverse_proxy anidb-mirror:8000
     }
 

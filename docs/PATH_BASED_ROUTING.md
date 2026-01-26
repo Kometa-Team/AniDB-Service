@@ -34,23 +34,25 @@ The Caddyfile is already configured for path-based routing. Just update the doma
 
 ```caddy
 yourdomain.com {
-    handle_path /anidb-service* {
-        handle_errors {
-            @maintenance expression {err.status_code} in [502, 503, 504]
-            handle @maintenance {
-                rewrite * /maintenance.html
-                file_server {
-                    root /var/www/html
-                }
+    handle_errors {
+        @maintenance expression {err.status_code} in [502, 503, 504]
+        handle @maintenance {
+            rewrite * /maintenance.html
+            file_server {
+                root /var/www/html
             }
         }
+    }
 
+    handle /anidb-service* {
         reverse_proxy anidb-mirror:8000
     }
 }
 ```
 
 Replace `yourdomain.com` with your actual domain.
+
+**Important:** Do NOT use `uri strip_prefix` - FastAPI handles the path prefix internally using ROOT_PATH.
 
 ### 3. Restart Services
 
