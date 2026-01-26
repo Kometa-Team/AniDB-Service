@@ -319,7 +319,10 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AniDB Mirror Service",
     lifespan=lifespan,
-    root_path=ROOT_PATH
+    root_path=ROOT_PATH,
+    openapi_url="/openapi.json" if ROOT_PATH else "/openapi.json",
+    docs_url="/docs" if ROOT_PATH else "/docs",
+    redoc_url="/redoc" if ROOT_PATH else "/redoc",
 )
 
 
