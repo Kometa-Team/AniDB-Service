@@ -50,10 +50,11 @@ yourdomain.com {
     # Handle /anidb-service path
     # NOTE: uri strip_prefix removes /anidb-service before sending to backend
     # FastAPI receives /stats instead of /anidb-service/stats
-    # Set ROOT_PATH=/anidb-service in .env so docs work correctly
     handle /anidb-service* {
         uri strip_prefix /anidb-service
-        reverse_proxy anidb-mirror:8000
+        reverse_proxy anidb-mirror:8000 {
+            header_up X-Script-Name /anidb-service
+        }
     }
 
     # Handle /plex-oauth path
@@ -70,15 +71,15 @@ yourdomain.com {
         reverse_proxy trakt-mal-oauth:5000
     }
 
-    # Handle root path - landing page and stats
-    handle / {
-        reverse_proxy anidb-mirror:8000
-    }
+                                                    # Handle root path - landing page and stats
+                                                    handle / {
+                                                        reverse_proxy anidb-mirror:8000
+                                                    }
 
-    # Fallback for any other paths
-    handle {
-        reverse_proxy anidb-mirror:8000
-    }
+                                                    # Fallback for any other paths
+                                                    handle {
+                                                        reverse_proxy anidb-mirror:8000
+                                                    }
 }
 
 # ============================================================================
