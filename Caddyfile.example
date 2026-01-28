@@ -80,6 +80,13 @@ yourdomain.com {
     # Fallback for any other paths
     handle {
         respond "Service not found" 404
+    }
+}
+
+# ============================================================================
+# SUBDOMAIN ROUTING (Dedicated subdomain for this service)
+# ============================================================================
+# Uncomment and customize this section if deploying at anidb-service.yourdomain.com
 
 # anidb-service.yourdomain.com {
 #     # Handle errors (like when the backend is down)
