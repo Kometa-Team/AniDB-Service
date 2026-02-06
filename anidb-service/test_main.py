@@ -9,26 +9,16 @@ import httpx
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
+
+from main import app, check_daily_limit, filter_mature_content, index_xml_to_db, init_database
 
 # Set test environment variables before importing main
 os.environ["XML_DIR"] = "/tmp/test_anidb/data"
 os.environ["DB_PATH"] = "/tmp/test_anidb/test.db"
-os.environ["API_USER"] = "test_user"
-os.environ["API_PASS"] = "test_pass"
 os.environ["ANIDB_USERNAME"] = "test_anidb"
 os.environ["ANIDB_PASSWORD"] = "test_anidb_pass"
 os.environ["DAILY_LIMIT"] = "10"
 os.environ["UPDATE_THRESHOLD_DAYS"] = "7"  # Make 10-day cache properly stale
-
-from main import (
-    app,
-    authenticate,
-    check_daily_limit,
-    filter_mature_content,
-    index_xml_to_db,
-    init_database,
-)
 
 
 @pytest.fixture
@@ -36,24 +26,6 @@ def test_client():
     """Provide a test client for the FastAPI app."""
     with TestClient(app) as client:
         yield client
-
-
-@pytest.fixture
-def auth_headers():
-    """Provide valid authentication headers."""
-    import base64
-
-    credentials = base64.b64encode(b"test_user:test_pass").decode("utf-8")
-    return {"Authorization": f"Basic {credentials}"}
-
-
-@pytest.fixture
-def invalid_auth_headers():
-    """Provide invalid authentication headers."""
-    import base64
-
-    credentials = base64.b64encode(b"wrong:wrong").decode("utf-8")
-    return {"Authorization": f"Basic {credentials}"}
 
 
 @pytest.fixture(scope="function")
@@ -145,32 +117,33 @@ def test_stats_endpoint_no_auth(test_client):
     assert data["status"] == "online"
 
 
-def test_anime_endpoint_requires_auth(test_client):
-    """Test that /anime endpoint requires authentication."""
-    response = test_client.get("/anime/1")
-    assert response.status_code == 401
+# Authentication tests removed - API no longer requires authentication
+# def test_anime_endpoint_requires_auth(test_client):
+#     """Test that /anime endpoint requires authentication."""
+#     response = test_client.get("/anime/1")
+#     assert response.status_code == 401
 
 
-@pytest.mark.asyncio
-async def test_anime_endpoint_with_valid_auth(
-    test_client, auth_headers, clean_test_env
-):
-    """Test that /anime endpoint accepts valid credentials."""
-    response = test_client.get("/anime/1", headers=auth_headers)
-    # Will return 202 (queued) or 200 depending on cache
-    assert response.status_code in [200, 202]
+# @pytest.mark.asyncio
+# async def test_anime_endpoint_with_valid_auth(
+#     test_client, clean_test_env
+# ):
+#     """Test that /anime endpoint accepts valid credentials."""
+#     response = test_client.get("/anime/1")
+#     # Will return 202 (queued) or 200 depending on cache
+#     assert response.status_code in [200, 202]
 
 
-def test_anime_endpoint_with_invalid_auth(test_client, invalid_auth_headers):
-    """Test that /anime endpoint rejects invalid credentials."""
-    response = test_client.get("/anime/1", headers=invalid_auth_headers)
-    assert response.status_code == 401
+# def test_anime_endpoint_with_invalid_auth(test_client):
+#     """Test that /anime endpoint rejects invalid credentials."""
+#     response = test_client.get("/anime/1")
+#     assert response.status_code == 401
 
 
-def test_search_endpoint_requires_auth(test_client):
-    """Test that /search/tags endpoint requires authentication."""
-    response = test_client.get("/search/tags?tags=action")
-    assert response.status_code == 401
+# def test_search_endpoint_requires_auth(test_client):
+#     """Test that /search/tags endpoint requires authentication."""
+#     response = test_client.get("/search/tags?tags=action")
+#     assert response.status_code == 401
 
 
 # ============================================================================
@@ -299,19 +272,17 @@ def test_stats_endpoint_structure(test_client):
     assert data["daily_limit"] == 10
 
 
-def test_anime_endpoint_invalid_aid(test_client, auth_headers):
+def test_anime_endpoint_invalid_aid(test_client):
     """Test that /anime rejects invalid AID values."""
-    response = test_client.get("/anime/0", headers=auth_headers)
+    response = test_client.get("/anime/0")
     assert response.status_code == 400
 
-    response = test_client.get("/anime/-1", headers=auth_headers)
+    response = test_client.get("/anime/-1")
     assert response.status_code == 400
 
 
 @pytest.mark.asyncio
-async def test_anime_endpoint_with_cache(
-    test_client, auth_headers, clean_test_env, sample_anime_xml
-):
+async def test_anime_endpoint_with_cache(test_client, clean_test_env, sample_anime_xml):
     """Test that /anime serves from cache when available."""
     # Database already initialized by clean_test_env fixture
 
@@ -323,23 +294,21 @@ async def test_anime_endpoint_with_cache(
     await index_xml_to_db(1, sample_anime_xml)
 
     # Request should return cached data
-    response = test_client.get("/anime/1", headers=auth_headers)
+    response = test_client.get("/anime/1")
     assert response.status_code == 200
     assert "X-Cache" in response.headers
     assert "Test Anime" in response.text
 
 
-def test_anime_endpoint_mature_parameter_default(test_client, auth_headers):
-    """Test that mature parameter defaults to true."""
-    response = test_client.get("/anime/1", headers=auth_headers)
+def test_anime_endpoint_mature_parameter_default(test_client):
+    """Test that mature parameter defaults to false."""
+    response = test_client.get("/anime/1")
     # Check that we can pass through (will queue if not cached)
     assert response.status_code in [200, 202]
 
 
 @pytest.mark.asyncio
-async def test_anime_endpoint_mature_filtering(
-    test_client, auth_headers, clean_test_env, mature_anime_xml
-):
+async def test_anime_endpoint_mature_filtering(test_client, clean_test_env, mature_anime_xml):
     """Test that mature parameter filters content."""
     # Database already initialized by clean_test_env fixture
 
@@ -351,21 +320,21 @@ async def test_anime_endpoint_mature_filtering(
     await index_xml_to_db(999, mature_anime_xml)
 
     # Request with mature=true (default) should include everything
-    response = test_client.get("/anime/999?mature=true", headers=auth_headers)
+    response = test_client.get("/anime/999?mature=true")
     assert response.status_code == 200
     assert "18 restricted" in response.text
     assert response.headers.get("X-Mature-Filter") == "disabled"
 
     # Request with mature=false should filter
-    response = test_client.get("/anime/999?mature=false", headers=auth_headers)
+    response = test_client.get("/anime/999?mature=false")
     assert response.status_code == 200
     assert "18 restricted" not in response.text
     assert response.headers.get("X-Mature-Filter") == "enabled"
 
 
-def test_search_tags_endpoint(test_client, auth_headers):
+def test_search_tags_endpoint(test_client):
     """Test search by tags endpoint."""
-    response = test_client.get("/search/tags?tags=action,comedy", headers=auth_headers)
+    response = test_client.get("/search/tags?tags=action,comedy")
     assert response.status_code == 200
     data = response.json()
 
@@ -376,14 +345,89 @@ def test_search_tags_endpoint(test_client, auth_headers):
     assert data["query"] == ["action", "comedy"]
 
 
-def test_search_tags_with_min_weight(test_client, auth_headers):
+def test_search_tags_with_min_weight(test_client):
     """Test search with custom minimum weight."""
-    response = test_client.get(
-        "/search/tags?tags=action&min_weight=500", headers=auth_headers
-    )
+    response = test_client.get("/search/tags?tags=action&min_weight=500")
     assert response.status_code == 200
     data = response.json()
     assert data["min_weight"] == 500
+
+
+@pytest.mark.asyncio
+async def test_search_tags_excludes_mature_content(test_client, clean_test_env):
+    """Test that mature=false excludes anime with adult tags."""
+    import aiosqlite
+
+    # Create test anime - one normal, one mature
+    async with aiosqlite.connect("/tmp/test_anidb/test.db") as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO anime VALUES (?, ?)", (100, datetime.now().isoformat())
+        )
+        await db.execute(
+            "INSERT OR REPLACE INTO anime VALUES (?, ?)", (200, datetime.now().isoformat())
+        )
+
+        # Normal anime with action tag
+        await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (100, "action", 400))
+
+        # Mature anime with action tag + 18 restricted tag
+        await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (200, "action", 400))
+        await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (200, "18 restricted", 600))
+
+        await db.commit()
+
+    # Search with mature=false (default) - should exclude mature anime
+    response = test_client.get("/search/tags?tags=action")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["mature"] is False
+    aids = [r["aid"] for r in data["results"]]
+    assert 100 in aids
+    assert 200 not in aids  # Mature anime excluded by default
+
+    # Search with mature=true - should include all anime
+    response = test_client.get("/search/tags?tags=action&mature=true")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["mature"] is True
+    aids = [r["aid"] for r in data["results"]]
+    assert 100 in aids
+    assert 200 in aids  # Mature anime included when explicitly requested
+
+
+@pytest.mark.asyncio
+async def test_search_tags_mature_keywords(test_client, clean_test_env):
+    """Test that all mature keywords are filtered."""
+    import aiosqlite
+
+    async with aiosqlite.connect("/tmp/test_anidb/test.db") as db:
+        # Create anime with different mature tags
+        for aid, mature_tag in [(301, "hentai"), (302, "pornography"), (303, "adult")]:
+            await db.execute(
+                "INSERT OR REPLACE INTO anime VALUES (?, ?)", (aid, datetime.now().isoformat())
+            )
+            await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (aid, "action", 400))
+            await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (aid, mature_tag, 500))
+
+        # Normal anime
+        await db.execute(
+            "INSERT OR REPLACE INTO anime VALUES (?, ?)", (400, datetime.now().isoformat())
+        )
+        await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (400, "action", 400))
+
+        await db.commit()
+
+    # With mature=false (default), all mature anime should be excluded
+    response = test_client.get("/search/tags?tags=action")
+    assert response.status_code == 200
+    data = response.json()
+    aids = [r["aid"] for r in data["results"]]
+
+    # Only normal anime should be returned
+    assert 400 in aids
+    assert 301 not in aids  # hentai
+    assert 302 not in aids  # pornography
+    assert 303 not in aids  # adult
 
 
 # ============================================================================
@@ -400,9 +444,7 @@ def test_invalid_xml_parsing():
 
 
 @pytest.mark.asyncio
-async def test_stale_cache_handling(
-    test_client, auth_headers, clean_test_env, sample_anime_xml
-):
+async def test_stale_cache_handling(test_client, clean_test_env, sample_anime_xml):
     """Test that stale cache is served while refreshing."""
     # Database already initialized by clean_test_env fixture
 
@@ -419,7 +461,7 @@ async def test_stale_cache_handling(
         await db.commit()
 
     # Should serve stale content
-    response = test_client.get("/anime/1", headers=auth_headers)
+    response = test_client.get("/anime/1")
     assert response.status_code == 200
     assert response.headers.get("X-Cache") == "STALE"
 
@@ -455,8 +497,9 @@ async def test_anidb_api_authentication(clean_test_env):
 @pytest.mark.asyncio
 async def test_anidb_ban_detection(clean_test_env):
     """Test that AniDB ban responses are handled."""
-    from main import fetch_from_anidb
     import aiosqlite
+
+    from main import fetch_from_anidb
 
     # Clear API logs to ensure we're under the daily limit
     async with aiosqlite.connect("/tmp/test_anidb/test.db") as db:
@@ -559,10 +602,10 @@ async def test_fetch_from_anidb_http_error(clean_test_env):
 @pytest.mark.asyncio
 async def test_fetch_from_anidb_daily_limit_exceeded(clean_test_env):
     """Test fetch fails when daily limit is reached."""
-    from main import fetch_from_anidb, log_api_request
-
     # Fill up the daily limit
     import aiosqlite
+
+    from main import fetch_from_anidb
 
     async with aiosqlite.connect("/tmp/test_anidb/test.db") as db:
         for i in range(10):
@@ -591,13 +634,15 @@ def test_root_endpoint(test_client):
 
 
 @pytest.mark.asyncio
-async def test_list_tags_endpoint(test_client, auth_headers, clean_test_env):
+async def test_list_tags_endpoint(test_client, clean_test_env):
     """Test tags listing endpoint."""
     # Add some test data
     import aiosqlite
 
     async with aiosqlite.connect("/tmp/test_anidb/test.db") as db:
-        await db.execute("INSERT OR REPLACE INTO anime VALUES (?, ?)", (1, datetime.now().isoformat()))
+        await db.execute(
+            "INSERT OR REPLACE INTO anime VALUES (?, ?)", (1, datetime.now().isoformat())
+        )
         await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (9991, "action", 400))
         await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (9991, "comedy", 300))
         await db.commit()
@@ -610,34 +655,32 @@ async def test_list_tags_endpoint(test_client, auth_headers, clean_test_env):
 
 
 @pytest.mark.asyncio
-async def test_get_anime_queues_missing_aid(test_client, auth_headers, clean_test_env):
+async def test_get_anime_queues_missing_aid(test_client, clean_test_env):
     """Test that missing AIDs are queued."""
-    response = test_client.get("/anime/9999", headers=auth_headers)
+    response = test_client.get("/anime/9999")
     assert response.status_code == 202
     assert "queued" in response.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
-async def test_search_tags_no_results(test_client, auth_headers, clean_test_env):
+async def test_search_tags_no_results(test_client, clean_test_env):
     """Test search with tags that don't exist."""
-    response = test_client.get("/search/tags?tags=nonexistent", headers=auth_headers)
+    response = test_client.get("/search/tags?tags=nonexistent")
     assert response.status_code == 200
     data = response.json()
     assert data["results"] == []
 
 
 @pytest.mark.asyncio
-async def test_search_tags_case_insensitive(
-    test_client, auth_headers, clean_test_env, sample_anime_xml
-):
+async def test_search_tags_case_insensitive(test_client, clean_test_env, sample_anime_xml):
     """Test that tag search is case insensitive."""
     # Index data
     await index_xml_to_db(1, sample_anime_xml)
 
     # Search with different cases
-    response1 = test_client.get("/search/tags?tags=ACTION", headers=auth_headers)
-    response2 = test_client.get("/search/tags?tags=action", headers=auth_headers)
-    response3 = test_client.get("/search/tags?tags=Action", headers=auth_headers)
+    response1 = test_client.get("/search/tags?tags=ACTION")
+    response2 = test_client.get("/search/tags?tags=action")
+    response3 = test_client.get("/search/tags?tags=Action")
 
     assert response1.status_code == 200
     assert response2.status_code == 200
@@ -653,9 +696,7 @@ async def test_search_tags_case_insensitive(
 
 
 @pytest.mark.asyncio
-async def test_get_anime_with_animedoc_naming(
-    test_client, auth_headers, clean_test_env, sample_anime_xml
-):
+async def test_get_anime_with_animedoc_naming(test_client, clean_test_env, sample_anime_xml):
     """Test that AnimeDoc_{aid}.xml naming format is supported."""
     # Create file with AnimeDoc naming
     cache_file = Path("/tmp/test_anidb/data/AnimeDoc_5.xml")
@@ -665,7 +706,7 @@ async def test_get_anime_with_animedoc_naming(
     await index_xml_to_db(5, sample_anime_xml)
 
     # Should be able to retrieve it
-    response = test_client.get("/anime/5", headers=auth_headers)
+    response = test_client.get("/anime/5")
     assert response.status_code == 200
     assert "Test Anime" in response.text
 
@@ -681,16 +722,14 @@ async def test_filter_mature_content_removes_multiple_tags(mature_anime_xml):
 
 
 @pytest.mark.asyncio
-async def test_get_anime_file_exists_no_db_entry(
-    test_client, auth_headers, clean_test_env, sample_anime_xml
-):
+async def test_get_anime_file_exists_no_db_entry(test_client, clean_test_env, sample_anime_xml):
     """Test handling of cached file without database entry."""
     # Create cached file without database entry
     cache_file = Path("/tmp/test_anidb/data/7.xml")
     cache_file.write_text(sample_anime_xml, encoding="utf-8")
 
     # Should serve stale and queue for refresh
-    response = test_client.get("/anime/7", headers=auth_headers)
+    response = test_client.get("/anime/7")
     assert response.status_code == 200
     assert response.headers.get("X-Cache") == "STALE"
     assert response.headers.get("X-Status") == "Refreshing"
@@ -710,15 +749,13 @@ async def test_stats_endpoint_with_queue_items(test_client, clean_test_env):
 
 
 @pytest.mark.asyncio
-async def test_search_tags_multiple_matches(
-    test_client, auth_headers, clean_test_env, sample_anime_xml
-):
+async def test_search_tags_multiple_matches(test_client, clean_test_env, sample_anime_xml):
     """Test search with multiple tag matches."""
     # Index multiple anime with overlapping tags
     await index_xml_to_db(1, sample_anime_xml)
     await index_xml_to_db(2, sample_anime_xml)
 
-    response = test_client.get("/search/tags?tags=action,comedy", headers=auth_headers)
+    response = test_client.get("/search/tags?tags=action,comedy")
     assert response.status_code == 200
     data = response.json()
     assert len(data["results"]) >= 2
@@ -728,30 +765,30 @@ async def test_search_tags_multiple_matches(
         assert "tag_matches" in result
 
 
-@pytest.mark.asyncio
-async def test_authenticate_timing_safe(test_client):
-    """Test that authentication uses timing-safe comparison."""
-    import time
-
-    # Valid credentials
-    valid_start = time.time()
-    response1 = test_client.get(
-        "/anime/1",
-        headers={"Authorization": "Basic dGVzdF91c2VyOnRlc3RfcGFzcw=="},
-    )
-    valid_time = time.time() - valid_start
-
-    # Invalid credentials
-    invalid_start = time.time()
-    response2 = test_client.get(
-        "/anime/1",
-        headers={"Authorization": "Basic d3Jvbmc6d3Jvbmc="},
-    )
-    invalid_time = time.time() - invalid_start
-
-    # Both should fail or succeed consistently
-    assert response1.status_code in [200, 202]
-    assert response2.status_code == 401
+# @pytest.mark.asyncio
+# async def test_authenticate_timing_safe(test_client):
+#     """Test that authentication uses timing-safe comparison."""
+#     import time
+#
+#     # Valid credentials
+#     valid_start = time.time()
+#     response1 = test_client.get(
+#         "/anime/1",
+#         headers={"Authorization": "Basic dGVzdF91c2VyOnRlc3RfcGFzcw=="},
+#     )
+#     valid_time = time.time() - valid_start
+#
+#     # Invalid credentials
+#     invalid_start = time.time()
+#     response2 = test_client.get(
+#         "/anime/1",
+#         headers={"Authorization": "Basic d3Jvbmc6d3Jvbmc="},
+#     )
+#     invalid_time = time.time() - invalid_start
+#
+#     # Both should fail or succeed consistently
+#     assert response1.status_code in [200, 202]
+#     assert response2.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -817,17 +854,13 @@ async def test_index_xml_parse_error(clean_test_env):
 
 
 @pytest.mark.asyncio
-async def test_search_tags_with_weight_filter(
-    test_client, auth_headers, clean_test_env, sample_anime_xml
-):
+async def test_search_tags_with_weight_filter(test_client, clean_test_env, sample_anime_xml):
     """Test that min_weight filter works correctly."""
     # Index data
     await index_xml_to_db(1, sample_anime_xml)
 
     # Search with high min_weight (should exclude lower weighted tags)
-    response = test_client.get(
-        "/search/tags?tags=action,comedy&min_weight=350", headers=auth_headers
-    )
+    response = test_client.get("/search/tags?tags=action,comedy&min_weight=350")
     assert response.status_code == 200
     data = response.json()
     # action has weight 400, comedy has 300, so only action should match
@@ -836,7 +869,7 @@ async def test_search_tags_with_weight_filter(
 
 @pytest.mark.asyncio
 async def test_get_anime_cache_hit_with_recent_update(
-    test_client, auth_headers, clean_test_env, sample_anime_xml
+    test_client, clean_test_env, sample_anime_xml
 ):
     """Test cache hit returns proper headers for fresh content."""
     # Create cached file
@@ -851,7 +884,7 @@ async def test_get_anime_cache_hit_with_recent_update(
         await db.execute("INSERT OR REPLACE INTO anime VALUES (?, ?)", (8, recent_date))
         await db.commit()
 
-    response = test_client.get("/anime/8", headers=auth_headers)
+    response = test_client.get("/anime/8")
     assert response.status_code == 200
     assert response.headers.get("X-Cache") == "HIT"
     assert "X-Age-Days" in response.headers
@@ -868,7 +901,7 @@ async def test_index_xml_database_error(clean_test_env, sample_anime_xml):
     """Test index_xml_to_db handles database errors."""
     with patch("aiosqlite.connect") as mock_connect:
         mock_connect.side_effect = Exception("Database connection failed")
-        
+
         with pytest.raises(Exception, match="Database connection failed"):
             await index_xml_to_db(1, sample_anime_xml)
 
@@ -892,10 +925,10 @@ async def test_tags_endpoint_database_error(test_client):
 
 
 @pytest.mark.asyncio
-async def test_search_tags_database_error(test_client, auth_headers):
+async def test_search_tags_database_error(test_client):
     """Test /search/tags endpoint handles database errors."""
     with patch("main.DB_PATH", Path("/nonexistent/path/to/db.db")):
-        response = test_client.get("/search/tags?tags=action", headers=auth_headers)
+        response = test_client.get("/search/tags?tags=action")
         assert response.status_code == 500
         assert "Search error" in response.json()["detail"]
 
@@ -909,20 +942,20 @@ async def test_search_tags_database_error(test_client, auth_headers):
 async def test_anidb_worker_cancellation(clean_test_env):
     """Test that worker handles cancellation gracefully."""
     from main import anidb_worker
-    
+
     # Create a new queue for this test
     test_queue = asyncio.Queue()
-    
+
     with patch("main.update_queue", test_queue):
         # Start worker
         worker_task = asyncio.create_task(anidb_worker())
-        
+
         # Give it a moment to start
         await asyncio.sleep(0.1)
-        
+
         # Cancel the worker
         worker_task.cancel()
-        
+
         # Should complete without error
         try:
             await worker_task
@@ -933,18 +966,17 @@ async def test_anidb_worker_cancellation(clean_test_env):
 @pytest.mark.asyncio
 async def test_anidb_worker_error_handling(clean_test_env):
     """Test that worker continues after errors."""
-    from main import fetch_from_anidb
     import aiosqlite
-    
+
     # Clear API logs
     async with aiosqlite.connect("/tmp/test_anidb/test.db") as db:
         await db.execute("DELETE FROM api_logs")
         await db.commit()
-    
+
     # Create a new queue and pending set for this test
     test_queue = asyncio.Queue()
     test_pending = set()
-    
+
     # Mock fetch to fail
     with patch("main.fetch_from_anidb", side_effect=Exception("Fetch failed")):
         with patch("main.update_queue", test_queue):
@@ -952,17 +984,18 @@ async def test_anidb_worker_error_handling(clean_test_env):
                 # Add item to queue
                 test_pending.add(99999)
                 await test_queue.put(99999)
-                
+
                 # Create and start worker task
                 async def run_worker():
                     from main import anidb_worker
+
                     await anidb_worker()
-                
+
                 worker_task = asyncio.create_task(run_worker())
-                
+
                 # Wait for processing
                 await asyncio.sleep(0.3)
-                
+
                 # Cancel worker
                 worker_task.cancel()
                 try:
@@ -980,17 +1013,18 @@ async def test_anidb_worker_error_handling(clean_test_env):
 async def test_lifespan_startup_creates_directories():
     """Test that lifespan creates necessary directories."""
     import shutil
-    from main import lifespan, app
-    
+
+    from main import app, lifespan
+
     test_xml = Path("/tmp/test_lifespan/data")
     test_db = Path("/tmp/test_lifespan/db")
-    
+
     # Clean up before
     if test_xml.parent.exists():
         shutil.rmtree(test_xml.parent)
     if test_db.parent.exists():
         shutil.rmtree(test_db.parent)
-    
+
     with patch("main.XML_DIR", test_xml):
         with patch("main.DB_PATH", test_db / "test.db"):
             with patch("main.SEED_DATA_DIR", Path("/tmp/nonexistent_seed")):
@@ -998,7 +1032,7 @@ async def test_lifespan_startup_creates_directories():
                     # Directories should be created
                     assert test_xml.exists()
                     assert test_db.exists()
-    
+
     # Clean up after
     if test_xml.parent.exists():
         shutil.rmtree(test_xml.parent)
@@ -1006,26 +1040,27 @@ async def test_lifespan_startup_creates_directories():
         shutil.rmtree(test_db.parent)
 
 
-@pytest.mark.asyncio  
+@pytest.mark.asyncio
 async def test_lifespan_shutdown_cleanup():
     """Test that lifespan properly shuts down worker."""
-    from main import lifespan, app
     import shutil
-    
+
+    from main import app, lifespan
+
     test_xml = Path("/tmp/test_shutdown/data")
     test_db = Path("/tmp/test_shutdown/db")
-    
+
     # Clean up before
     if test_xml.parent.exists():
         shutil.rmtree(test_xml.parent)
-    
+
     with patch("main.XML_DIR", test_xml):
         with patch("main.DB_PATH", test_db / "test.db"):
             with patch("main.SEED_DATA_DIR", Path("/tmp/nonexistent_seed")):
                 async with lifespan(app):
                     await asyncio.sleep(0.1)
                 # Exits cleanly, worker is cancelled
-    
+
     # Clean up after
     if test_xml.parent.exists():
         shutil.rmtree(test_xml.parent)

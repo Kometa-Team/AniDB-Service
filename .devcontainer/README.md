@@ -81,8 +81,6 @@ pytest test_main.py::test_name -v
 ## Environment Variables
 
 The dev container sets default environment variables in `docker-compose.yml`:
-- `API_USER=dev_user`
-- `API_PASS=dev_pass`
 - `XML_DIR=/workspace/data`
 - `DB_PATH=/workspace/database.db`
 

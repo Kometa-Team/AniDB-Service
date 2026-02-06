@@ -5,30 +5,28 @@ services:
     build:
       context: ..
       dockerfile: .devcontainer/Dockerfile
-    
+
     volumes:
       # Mount the workspace
       - ..:/workspace:cached
-      
+
       # Persist Python packages
       - venv-data:/home/vscode/.local
-      
+
       # Persist bash history
       - bash-history:/commandhistory
-    
+
     # Overrides default command so things don't shut down after the process ends
     command: sleep infinity
-    
+
     # Use a non-root user
     user: vscode
-    
+
     # Environment variables
     environment:
       - XML_DIR=/workspace/data
       - DB_PATH=/workspace/database.db
       - SEED_DATA_DIR=/workspace/seed_data
-      - API_USER=dev_user
-      - API_PASS=dev_pass
       - ANIDB_CLIENT=kometa
       - ANIDB_VERSION=1
       - DAILY_LIMIT=200

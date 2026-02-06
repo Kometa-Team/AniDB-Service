@@ -17,8 +17,6 @@
             "jinja": true,
             "justMyCode": false,
             "env": {
-                "API_USER": "kometa_admin",
-                "API_PASS": "bingbangboing",
                 "XML_DIR": "/workspace/data",
                 "DB_PATH": "/workspace/database.db",
                 "SEED_DATA_DIR": "/workspace/seed_data",

@@ -58,12 +58,25 @@ repos:
         additional_dependencies: ["bandit[toml]"]
         exclude: ^tests/
 
-  # Type checking with mypy
+  # Type checking with mypy (root level)
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.13.0
     hooks:
       - id: mypy
+        name: mypy (root)
         args: [--ignore-missing-imports, --no-strict-optional]
         additional_dependencies:
           - types-aiofiles
-        exclude: ^tests/
+        exclude: ^(tests/|anidb-service/)
+
+  # Type checking with mypy (anidb-service)
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.13.0
+    hooks:
+      - id: mypy
+        name: mypy (anidb-service)
+        args: [--ignore-missing-imports, --no-strict-optional]
+        additional_dependencies:
+          - types-aiofiles
+        files: ^anidb-service/
+        exclude: ^anidb-service/tests?/

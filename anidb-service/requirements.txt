@@ -1,8 +1,9 @@
-fastapi
-uvicorn[standard]
-httpx
 aiosqlite
 boto3
+defusedxml
+fastapi
+httpx
 pytest
 pytest-asyncio
 pytest-cov
+uvicorn[standard]

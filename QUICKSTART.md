@@ -19,9 +19,6 @@ cp .env.example .env
 nano .env
 ```
 
-**Minimum required changes:**
-- Change `API_PASS` to a secure password
-
 ### 2. Update Domain
 
 Copy and edit `Caddyfile`:
@@ -54,11 +51,11 @@ docker compose up -d --build
 ### 4. Verify
 
 ```bash
-# Check status (no auth required)
+# Check status
 curl http://localhost:8000/stats
 
-# Test authentication (replace with your password)
-curl -u kometa_admin:your_password http://localhost:8000/anime/1
+# Test fetching an anime
+curl http://localhost:8000/anime/1
 ```
 
 ## Expected Response

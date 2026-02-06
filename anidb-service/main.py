@@ -1,6 +1,7 @@
+"""AniDB Mirror Service - FastAPI-based caching service for AniDB anime metadata."""
+
 import asyncio
 import os
-import secrets
 import xml.etree.ElementTree as ET
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -9,11 +10,9 @@ from typing import Any, Dict, Optional
 
 import aiosqlite
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, status, Request
-from fastapi.responses import Response
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-
 from common import extract_seed_data
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import Response
 
 # --- CONFIG ---
 XML_DIR = Path(os.getenv("XML_DIR", "/app/data"))
@@ -31,12 +30,7 @@ ANIDB_PROTO_VER = os.getenv("ANIDB_PROTO_VER", "1")
 ANIDB_USERNAME = os.getenv("ANIDB_USERNAME", "")  # For accessing mature content
 ANIDB_PASSWORD = os.getenv("ANIDB_PASSWORD", "")  # For accessing mature content
 
-# Authentication
-API_USER = os.getenv("API_USER", "kometa_admin")
-API_PASS = os.getenv("API_PASS", "change_me_to_something_secure")
-
 # Global state
-security = HTTPBasic()
 update_queue: Optional[asyncio.Queue] = None
 pending_aids: set = set()
 worker_task: Optional[asyncio.Task] = None
@@ -123,9 +117,7 @@ async def check_daily_limit() -> bool:
 
     async with aiosqlite.connect(DB_PATH) as db:
         cutoff = (datetime.now() - timedelta(hours=24)).isoformat()
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM api_logs WHERE timestamp > ?", (cutoff,)
-        )
+        cursor = await db.execute("SELECT COUNT(*) FROM api_logs WHERE timestamp > ?", (cutoff,))
         result = await cursor.fetchone()
         count = result[0] if result else 0
         return count < DAILY_LIMIT
@@ -207,7 +199,7 @@ async def fetch_from_anidb(aid: int) -> str:
                 )
 
             await log_api_request(aid, success=True)
-            return response.text
+            return str(response.text)
 
     except httpx.HTTPError as e:
         await log_api_request(aid, success=False)
@@ -257,17 +249,17 @@ async def anidb_worker() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """FastAPI lifespan context for startup/shutdown."""
+    """Manage FastAPI lifespan context for startup/shutdown."""
     global worker_task, update_queue
 
     # Startup
     print("🔧 Initializing AniDB Service...")
     XML_DIR.mkdir(parents=True, exist_ok=True)
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Create the queue in this event loop
     update_queue = asyncio.Queue()
-    
+
     # Set startup flag for healthcheck
     app.state.starting_up = True
 
@@ -281,9 +273,10 @@ async def lifespan(app: FastAPI):
     async def index_seed_data_background():
         """Index seed data in background without blocking startup."""
         try:
-            import aiosqlite
             import gc
-            
+
+            import aiosqlite
+
             async with aiosqlite.connect(DB_PATH) as db:
                 cursor = await db.execute("SELECT COUNT(*) FROM anime")
                 result = await cursor.fetchone()
@@ -301,16 +294,18 @@ async def lifespan(app: FastAPI):
                                     aid = xml_file.stem.split("_")[1]
                                 else:
                                     aid = xml_file.stem
-                                
+
                                 xml_text = xml_file.read_text(encoding="utf-8")
                                 await index_xml_to_db(int(aid), xml_text)
                                 indexed_count += 1
-                                
+
                                 # Commit every 100 files to reduce memory pressure
                                 if indexed_count % 100 == 0:
                                     await db.commit()
                                     if len(xml_files) > 100:
-                                        print(f"   Progress: {indexed_count}/{len(xml_files)} files indexed...")
+                                        print(
+                                            f"   Progress: {indexed_count}/{len(xml_files)} files indexed..."
+                                        )
                                     gc.collect()
                             except Exception as e:
                                 print(f"⚠️ Error indexing {xml_file.name}: {e}")
@@ -318,11 +313,11 @@ async def lifespan(app: FastAPI):
                         print(f"✅ Indexed {indexed_count} files")
         except Exception as e:
             print(f"❌ Background indexing failed: {e}")
-    
+
     # Start background tasks
     asyncio.create_task(index_seed_data_background())
     worker_task = asyncio.create_task(anidb_worker())
-    
+
     # Service is ready immediately
     app.state.starting_up = False
     print("✅ Service ready (seed indexing in background if needed)")
@@ -347,19 +342,6 @@ app = FastAPI(
     docs_url="/docs" if ROOT_PATH else "/docs",
     redoc_url="/redoc" if ROOT_PATH else "/redoc",
 )
-
-
-def authenticate(credentials: HTTPBasicCredentials = Depends(security)) -> str:
-    """Verify HTTP Basic Authentication credentials."""
-    is_user_ok = secrets.compare_digest(credentials.username, API_USER)
-    is_pass_ok = secrets.compare_digest(credentials.password, API_PASS)
-    if not (is_user_ok and is_pass_ok):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials.username
 
 
 @app.get("/")
@@ -407,22 +389,22 @@ async def root(request: Request):
     <body>
         <h1>🎬 AniDB Mirror Service</h1>
         <p>A caching service for AniDB anime metadata with rate limiting and background updates.</p>
-        
+
         <h2>API Endpoints</h2>
-        
+
         <div class="endpoint">
-            <strong>GET /stats</strong> - Service statistics (no auth required)<br>
+            <strong>GET /stats</strong> - Service statistics<br>
             <code>curl {base_url}/stats</code>
         </div>
-        
+
         <div class="endpoint">
-            <strong>GET /anime/{{aid}}</strong> - Get anime by AniDB ID (requires auth)<br>
-            <code>curl -u username:password {base_url}/anime/1</code>
+            <strong>GET /anime/{{aid}}</strong> - Get anime by AniDB ID<br>
+            <code>curl {base_url}/anime/1</code>
         </div>
-        
+
         <div class="endpoint">
-            <strong>GET /search/tags</strong> - Search by tags (requires auth)<br>
-            <code>curl -u username:password "{base_url}/search/tags?tags=action,comedy&min_weight=300"</code>
+            <strong>GET /search/tags</strong> - Search by tags<br>
+            <code>curl "{base_url}/search/tags?tags=action,comedy&min_weight=300&mature=true"</code>
         </div>
     </body>
     </html>
@@ -434,17 +416,19 @@ async def root(request: Request):
 async def list_tags():
     """List all known tags with usage statistics."""
     from fastapi.responses import HTMLResponse
-    
+
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            cursor = await db.execute("""
+            cursor = await db.execute(
+                """
                 SELECT name, COUNT(DISTINCT aid) as anime_count, AVG(weight) as avg_weight
                 FROM tags
                 GROUP BY LOWER(name)
                 ORDER BY anime_count DESC, avg_weight DESC
-            """)
+            """
+            )
             tags = await cursor.fetchall()
-        
+
         tag_rows = ""
         for name, count, avg_weight in tags:
             tag_rows += f"""
@@ -454,7 +438,7 @@ async def list_tags():
                     <td>{int(avg_weight) if avg_weight else 0}</td>
                 </tr>
             """
-        
+
         html_content = f"""
         <!DOCTYPE html>
         <html>
@@ -505,11 +489,11 @@ async def list_tags():
         <body>
             <h1>🏷️ All Tags</h1>
             <p><a href="/">← Back to Home</a></p>
-            
+
             <div class="stats">
                 <strong>Total unique tags:</strong> {len(tags)}
             </div>
-            
+
             <table>
                 <thead>
                     <tr>
@@ -528,8 +512,7 @@ async def list_tags():
         return HTMLResponse(content=html_content)
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database error: {{str(e)}}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Database error: {str(e)}"
         )
 
 
@@ -563,15 +546,16 @@ async def get_stats() -> Dict[str, Any]:
         )
 
 
-@app.get("/anime/{aid}", dependencies=[Depends(authenticate)])
-async def get_anime(aid: int, mature: bool = True) -> Response:
+@app.get("/anime/{aid}")
+async def get_anime(aid: int, mature: bool = False) -> Response:
     """
     Fetch anime metadata by AniDB ID.
+
     Returns cached XML if available and fresh, otherwise queues update.
 
     Args:
         aid: AniDB anime ID
-        mature: Include mature/18+ content (default: True)
+        mature: Include mature/18+ content (default: False)
     """
     if aid <= 0:
         raise HTTPException(
@@ -588,9 +572,7 @@ async def get_anime(aid: int, mature: bool = True) -> Response:
     if xml_file.exists():
         try:
             async with aiosqlite.connect(DB_PATH) as db:
-                cursor = await db.execute(
-                    "SELECT last_updated FROM anime WHERE aid = ?", (aid,)
-                )
+                cursor = await db.execute("SELECT last_updated FROM anime WHERE aid = ?", (aid,))
                 row = await cursor.fetchone()
 
                 if row:
@@ -619,11 +601,11 @@ async def get_anime(aid: int, mature: bool = True) -> Response:
                         if aid not in pending_aids:
                             pending_aids.add(aid)
                             await update_queue.put(aid)
-                        
+
                         content = xml_file.read_text(encoding="utf-8")
                         if not mature:
                             content = filter_mature_content(content)
-                        
+
                         return Response(
                             content=content,
                             media_type="application/xml",
@@ -639,11 +621,11 @@ async def get_anime(aid: int, mature: bool = True) -> Response:
                     if aid not in pending_aids:
                         pending_aids.add(aid)
                         await update_queue.put(aid)
-                    
+
                     content = xml_file.read_text(encoding="utf-8")
                     if not mature:
                         content = filter_mature_content(content)
-                    
+
                     return Response(
                         content=content,
                         media_type="application/xml",
@@ -668,32 +650,62 @@ async def get_anime(aid: int, mature: bool = True) -> Response:
     )
 
 
-@app.get("/search/tags", dependencies=[Depends(authenticate)])
-async def search_by_tags(tags: str, min_weight: int = 200) -> Dict[str, Any]:
+@app.get("/search/tags")
+async def search_by_tags(tags: str, min_weight: int = 200, mature: bool = False) -> Dict[str, Any]:
     """
     Search for anime by tags.
-    Example: /search/tags?tags=action,comedy&min_weight=300
+
+    Example: /search/tags?tags=action,comedy&min_weight=300&mature=true
+
+    Args:
+        tags: Comma-separated list of tags to search for
+        min_weight: Minimum tag weight (default: 200)
+        mature: Include mature/18+ content (default: False)
     """
     tag_list = [t.strip().lower() for t in tags.split(",")]
 
     try:
         async with aiosqlite.connect(DB_PATH) as db:
             placeholders = ",".join("?" * len(tag_list))
-            query = f"""
-                SELECT aid, COUNT(*) as match_count
-                FROM tags
-                WHERE LOWER(name) IN ({placeholders})
-                AND weight >= ?
-                GROUP BY aid
-                ORDER BY match_count DESC
-                LIMIT 100
-            """
-            cursor = await db.execute(query, (*tag_list, min_weight))
+
+            # Build query with optional mature content exclusion
+            if mature:
+                query = f"""
+                    SELECT aid, COUNT(*) as match_count
+                    FROM tags
+                    WHERE LOWER(name) IN ({placeholders})
+                    AND weight >= ?
+                    GROUP BY aid
+                    ORDER BY match_count DESC
+                    LIMIT 100
+                """
+                cursor = await db.execute(query, (*tag_list, min_weight))
+            else:
+                # Exclude anime with mature tags
+                mature_keywords = ["hentai", "pornography", "18 restricted", "adult"]
+                mature_placeholders = ",".join("?" * len(mature_keywords))
+                query = f"""
+                    SELECT aid, COUNT(*) as match_count
+                    FROM tags
+                    WHERE LOWER(name) IN ({placeholders})
+                    AND weight >= ?
+                    AND aid NOT IN (
+                        SELECT DISTINCT aid
+                        FROM tags
+                        WHERE LOWER(name) IN ({mature_placeholders})
+                    )
+                    GROUP BY aid
+                    ORDER BY match_count DESC
+                    LIMIT 100
+                """
+                cursor = await db.execute(query, (*tag_list, min_weight, *mature_keywords))
+
             results = await cursor.fetchall()
 
         return {
             "query": tag_list,
             "min_weight": min_weight,
+            "mature": mature,
             "results": [{"aid": aid, "tag_matches": count} for aid, count in results],
         }
     except Exception as e:

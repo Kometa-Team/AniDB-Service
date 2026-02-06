@@ -102,37 +102,29 @@ Since all API endpoints work correctly, you can:
 
 Since the interactive docs don't work in path-based mode, here's a quick reference:
 
-### Authentication
-All endpoints except `/stats` require HTTP Basic Auth:
-```bash
-curl -u username:password https://utilities.kometa.wiki/anidb-service/endpoint
-```
-
 ### Main Endpoints
 
-| Endpoint | Method | Auth Required | Description |
-|----------|--------|---------------|-------------|
-| `/` | GET | No | Service info |
-| `/stats` | GET | No | Service statistics |
-| `/anime/{aid}` | GET | Yes | Get anime by ID |
-| `/search/tags` | GET | Yes | Search by tags |
-| `/search/sequels` | GET | Yes | Find sequels |
-| `/search/prequels` | GET | Yes | Find prequels |
-| `/tags` | GET | Yes | Browse all tags |
-| `/openapi.json` | GET | No | OpenAPI specification |
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | Service info |
+| `/stats` | GET | Service statistics |
+| `/anime/{aid}` | GET | Get anime by ID |
+| `/search/tags` | GET | Search by tags |
+| `/search/sequels` | GET | Find sequels |
+| `/search/prequels` | GET | Find prequels |
+| `/tags` | GET | Browse all tags |
+| `/openapi.json` | GET | OpenAPI specification |
 
 ### Example Usage
 
 **Get anime details:**
 ```bash
-curl -u kometa_admin:your_password \
-  https://utilities.kometa.wiki/anidb-service/anime/1
+curl https://utilities.kometa.wiki/anidb-service/anime/1
 ```
 
 **Search by tags:**
 ```bash
-curl -u kometa_admin:your_password \
-  "https://utilities.kometa.wiki/anidb-service/search/tags?tags=action,comedy&min_weight=300"
+curl "https://utilities.kometa.wiki/anidb-service/search/tags?tags=action,comedy&min_weight=300"
 ```
 
 **Get service stats:**

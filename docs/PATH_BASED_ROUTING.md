@@ -70,7 +70,7 @@ docker compose up -d
 curl https://yourdomain.com/anidb-service/stats
 
 # Get anime
-curl -u username:password https://yourdomain.com/anidb-service/anime/1
+curl https://yourdomain.com/anidb-service/anime/1
 
 # API docs
 https://yourdomain.com/anidb-service/docs

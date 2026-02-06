@@ -52,12 +52,6 @@ pytest -m asyncio
 
 ## Test Categories
 
-### Authentication Tests
-- `/stats` endpoint (no auth required)
-- `/anime` endpoint (auth required)
-- `/search` endpoint (auth required)
-- Valid/invalid credentials
-
 ### Database Tests
 - Table initialization
 - XML indexing
@@ -116,10 +110,10 @@ async def test_your_feature(test_client, auth_headers, clean_test_env):
     """Test description."""
     # Arrange
     await init_database()
-    
+
     # Act
     response = test_client.get("/endpoint", headers=auth_headers)
-    
+
     # Assert
     assert response.status_code == 200
 ```
