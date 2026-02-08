@@ -29,8 +29,10 @@ def get_plex_pin():
             headers={
                 "Accept": "application/json",
                 "X-Plex-Client-Identifier": PLEX_IDENTIFIER,
-                "X-Plex-Product": "Kometa Plex OAuth",
+                "X-Plex-Product": "Kometa",
                 "X-Plex-Version": PLEX_VERSION,
+                "X-Plex-Device": "Kometa-Utilities",
+                "X-Plex-Platform": "Web",
             },
             timeout=10,
         )
@@ -49,8 +51,10 @@ def check_pin_auth(pin_id):
             headers={
                 "Accept": "application/json",
                 "X-Plex-Client-Identifier": PLEX_IDENTIFIER,
-                "X-Plex-Product": "Kometa Plex OAuth",
+                "X-Plex-Product": "Kometa",
                 "X-Plex-Version": PLEX_VERSION,
+                "X-Plex-Device": "Kometa-Utilities",
+                "X-Plex-Platform": "Web",
             },
             timeout=10,
         )
@@ -69,8 +73,10 @@ def get_user_info(auth_token):
             headers={
                 "Accept": "application/json",
                 "X-Plex-Client-Identifier": PLEX_IDENTIFIER,
-                "X-Plex-Product": "Kometa Plex OAuth",
+                "X-Plex-Product": "Kometa",
                 "X-Plex-Version": PLEX_VERSION,
+                "X-Plex-Device": "Kometa-Utilities",
+                "X-Plex-Platform": "Web",
                 "X-Plex-Token": auth_token,
             },
             timeout=10,
