@@ -42,6 +42,11 @@ async def clean_test_env():
     test_dir.mkdir(parents=True, exist_ok=True)
     (test_dir / "data").mkdir(exist_ok=True)
 
+    # Ensure database file can be created (create it directly)
+    # This is needed because aiosqlite sometimes has issues with the parent directory
+    db_path = Path("/tmp/test_anidb/test.db")
+    db_path.touch()
+
     # Initialize database for tests
     await init_database()
 
@@ -368,11 +373,11 @@ async def test_search_tags_excludes_mature_content(test_client, clean_test_env):
         )
 
         # Normal anime with action tag
-        await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (100, "action", 400))
+        await db.execute("INSERT INTO tags VALUES (?, ?, ?, ?)", (100, None, "action", 400))
 
         # Mature anime with action tag + 18 restricted tag
-        await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (200, "action", 400))
-        await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (200, "18 restricted", 600))
+        await db.execute("INSERT INTO tags VALUES (?, ?, ?, ?)", (200, None, "action", 400))
+        await db.execute("INSERT INTO tags VALUES (?, ?, ?, ?)", (200, None, "18 restricted", 600))
 
         await db.commit()
 
@@ -406,14 +411,14 @@ async def test_search_tags_mature_keywords(test_client, clean_test_env):
             await db.execute(
                 "INSERT OR REPLACE INTO anime VALUES (?, ?)", (aid, datetime.now().isoformat())
             )
-            await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (aid, "action", 400))
-            await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (aid, mature_tag, 500))
+            await db.execute("INSERT INTO tags VALUES (?, ?, ?, ?)", (aid, None, "action", 400))
+            await db.execute("INSERT INTO tags VALUES (?, ?, ?, ?)", (aid, None, mature_tag, 500))
 
         # Normal anime
         await db.execute(
             "INSERT OR REPLACE INTO anime VALUES (?, ?)", (400, datetime.now().isoformat())
         )
-        await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (400, "action", 400))
+        await db.execute("INSERT INTO tags VALUES (?, ?, ?, ?)", (400, None, "action", 400))
 
         await db.commit()
 
@@ -643,8 +648,8 @@ async def test_list_tags_endpoint(test_client, clean_test_env):
         await db.execute(
             "INSERT OR REPLACE INTO anime VALUES (?, ?)", (1, datetime.now().isoformat())
         )
-        await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (9991, "action", 400))
-        await db.execute("INSERT INTO tags VALUES (?, ?, ?)", (9991, "comedy", 300))
+        await db.execute("INSERT INTO tags VALUES (?, ?, ?, ?)", (9991, None, "action", 400))
+        await db.execute("INSERT INTO tags VALUES (?, ?, ?, ?)", (9991, None, "comedy", 300))
         await db.commit()
 
     response = test_client.get("/tags")

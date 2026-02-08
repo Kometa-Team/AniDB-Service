@@ -47,6 +47,7 @@ async def init_database() -> None:
             );
             CREATE TABLE IF NOT EXISTS tags (
                 aid INTEGER NOT NULL,
+                tag_id INTEGER,
                 name TEXT NOT NULL,
                 weight INTEGER DEFAULT 0
             );
@@ -61,6 +62,7 @@ async def init_database() -> None:
                 success INTEGER DEFAULT 1
             );
             CREATE INDEX IF NOT EXISTS idx_tags_aid ON tags(aid);
+            CREATE INDEX IF NOT EXISTS idx_tags_tag_id ON tags(tag_id);
             CREATE INDEX IF NOT EXISTS idx_relations_aid ON relations(aid);
             CREATE INDEX IF NOT EXISTS idx_api_logs_timestamp ON api_logs(timestamp);
         """
@@ -80,12 +82,12 @@ async def index_xml_to_db(aid: int, xml_text: str) -> None:
 
             # Index Tags
             tags = [
-                (aid, t.findtext("name"), int(t.get("weight", 0)))
+                (aid, int(t.get("id") or "0"), t.findtext("name"), int(t.get("weight", 0)))
                 for t in root.findall(".//tag")
                 if t.findtext("name")
             ]
             if tags:
-                await db.executemany("INSERT INTO tags VALUES (?, ?, ?)", tags)
+                await db.executemany("INSERT INTO tags VALUES (?, ?, ?, ?)", tags)
 
             # Index Relations
             rels = [
@@ -403,8 +405,18 @@ async def root(request: Request):
         </div>
 
         <div class="endpoint">
+            <strong>GET /tags</strong> - List all tags with usage statistics<br>
+            <code>curl {base_url}/tags</code>
+        </div>
+
+        <div class="endpoint">
             <strong>GET /search/tags</strong> - Search by tags<br>
             <code>curl "{base_url}/search/tags?tags=action,comedy&min_weight=300&mature=true"</code>
+        </div>
+
+        <div class="endpoint">
+            <strong>GET /tags/{{tag_id}}</strong> - Get anime by tag ID<br>
+            <code>curl "{base_url}/tags/36?limit=10"</code>
         </div>
     </body>
     </html>
@@ -707,6 +719,84 @@ async def search_by_tags(tags: str, min_weight: int = 200, mature: bool = False)
             "min_weight": min_weight,
             "mature": mature,
             "results": [{"aid": aid, "tag_matches": count} for aid, count in results],
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Search error: {str(e)}",
+        )
+
+
+@app.get("/tags/{tag_id}")
+async def get_anime_by_tag(tag_id: int, limit: int = 100, mature: bool = False) -> Dict[str, Any]:
+    """
+    Get anime by tag ID.
+
+    Example: /tags/36?limit=10
+
+    Args:
+        tag_id: The AniDB tag ID
+        limit: Maximum number of results to return (default: 100, max: 1000)
+        mature: Include mature/18+ content (default: False)
+    """
+    if tag_id <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid tag_id. Must be a positive integer.",
+        )
+
+    if limit <= 0 or limit > 1000:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Limit must be between 1 and 1000.",
+        )
+
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            # First get the tag name
+            cursor = await db.execute(
+                "SELECT DISTINCT name FROM tags WHERE tag_id = ? LIMIT 1", (tag_id,)
+            )
+            tag_row = await cursor.fetchone()
+            tag_name = tag_row[0] if tag_row else None
+
+            # Build query with optional mature content exclusion
+            if mature:
+                query = """
+                    SELECT aid, weight
+                    FROM tags
+                    WHERE tag_id = ?
+                    ORDER BY weight DESC
+                    LIMIT ?
+                """
+                cursor = await db.execute(query, (tag_id, limit))
+            else:
+                # Exclude anime with mature tags
+                mature_keywords = ["hentai", "pornography", "18 restricted", "adult"]
+                mature_placeholders = ",".join("?" * len(mature_keywords))
+                query = f"""
+                    SELECT aid, weight
+                    FROM tags
+                    WHERE tag_id = ?
+                    AND aid NOT IN (
+                        SELECT DISTINCT aid
+                        FROM tags
+                        WHERE LOWER(name) IN ({mature_placeholders})
+                    )
+                    ORDER BY weight DESC
+                    LIMIT ?
+                """
+                cursor = await db.execute(query, (tag_id, *mature_keywords, limit))
+
+            results = await cursor.fetchall()
+
+        return {
+            "tag_id": tag_id,
+            "tag_name": tag_name,
+            "limit": limit,
+            "mature": mature,
+            "count": len(results),
+            "results": [{"aid": aid, "weight": weight} for aid, weight in results],
         }
     except Exception as e:
         raise HTTPException(
