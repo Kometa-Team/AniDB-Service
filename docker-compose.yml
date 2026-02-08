@@ -34,6 +34,38 @@ services:
         reservations:
           memory: 64M
 
+  trakt-oauth:
+    build: ./trakt-oauth
+    container_name: trakt-oauth
+    restart: unless-stopped
+    env_file:
+      - ./trakt-oauth/.env
+    environment:
+      - ROOT_PATH=/trakt-oauth
+      - SECRET_KEY=${TRAKT_SECRET_KEY:-changeme-generate-random-key}
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  mal-oauth:
+    build: ./mal-oauth
+    container_name: mal-oauth
+    restart: unless-stopped
+    env_file:
+      - ./mal-oauth/.env
+    environment:
+      - ROOT_PATH=/mal-oauth
+      - SECRET_KEY=${MAL_SECRET_KEY:-changeme-generate-random-key}
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
   trakt-mal-oauth:
     build: ./trakt-mal-oauth
     container_name: trakt-mal-oauth
