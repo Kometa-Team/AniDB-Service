@@ -304,7 +304,7 @@
             showStatus('Exchanging code for token...', 'info');
 
             try {
-                const response = await fetch('/api/exchange-code', {
+                const response = await fetch('./api/exchange-code', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
