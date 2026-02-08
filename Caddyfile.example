@@ -26,12 +26,6 @@ yourdomain.com {
     # authenticate, so callbacks must be publicly accessible.
     # ========================================================================
 
-    # MyAnimeList OAuth callback - NO AUTH
-    handle /trakt-mal-oauth/mal/callback* {
-        uri strip_prefix /trakt-mal-oauth
-        reverse_proxy trakt-mal-oauth:5000
-    }
-
     # Plex OAuth callback - NO AUTH
     handle /plex-oauth/auth/callback* {
         uri strip_prefix /plex-oauth
@@ -71,11 +65,11 @@ yourdomain.com {
         reverse_proxy trakt-oauth:5000
     }
 
-    # Handle /trakt-mal-oauth path
-    # Flask app for Trakt and MyAnimeList OAuth authentication
-    handle /trakt-mal-oauth* {
-        uri strip_prefix /trakt-mal-oauth
-        reverse_proxy trakt-mal-oauth:5000
+    # Handle /mal-oauth path
+    # Flask app for MyAnimeList OAuth authentication
+    handle /mal-oauth* {
+        uri strip_prefix /mal-oauth
+        reverse_proxy mal-oauth:5000
     }
 
     # Handle root path - serve static landing page

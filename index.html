@@ -40,9 +40,14 @@
         }
         .services {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            grid-template-columns: repeat(2, 1fr);
             gap: 20px;
             margin-bottom: 40px;
+        }
+        @media (max-width: 600px) {
+            .services {
+                grid-template-columns: 1fr;
+            }
         }
         .service-card {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -101,10 +106,10 @@
                 <div class="service-desc">Get your Trakt access token</div>
             </a>
 
-            <a href="/trakt-mal-oauth" class="service-card">
+            <a href="/mal-oauth" class="service-card">
                 <div class="service-icon">🎯</div>
-                <div class="service-title">Trakt & MAL OAuth</div>
-                <div class="service-desc">Connect Trakt & MyAnimeList accounts</div>
+                <div class="service-title">MAL OAuth</div>
+                <div class="service-desc">Connect your MyAnimeList account</div>
             </a>
 
             <a href="/anidb-service" class="service-card">

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trakt OAuth - Kometa</title>
+    <title>MyAnimeList OAuth - Kometa</title>
     <style>
         * {
             margin: 0;
@@ -13,7 +13,7 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #ED1C24 0%, #B5090D 100%);
+            background: linear-gradient(135deg, #2E51A2 0%, #1A2F6F 100%);
             min-height: 100vh;
             display: flex;
             justify-content: center;
@@ -68,7 +68,7 @@
 
         .form-group input:focus {
             outline: none;
-            border-color: #ED1C24;
+            border-color: #2E51A2;
         }
 
         .status {
@@ -109,12 +109,12 @@
         }
 
         .button.primary {
-            background: #ED1C24;
+            background: #2E51A2;
             color: white;
         }
 
         .button.primary:hover {
-            background: #B5090D;
+            background: #1A2F6F;
         }
 
         .button.primary:disabled {
@@ -133,8 +133,8 @@
         }
 
         .instructions {
-            background: #fff4f4;
-            border-left: 4px solid #ED1C24;
+            background: #f0f4ff;
+            border-left: 4px solid #2E51A2;
             padding: 15px;
             margin: 20px 0;
             border-radius: 3px;
@@ -194,8 +194,8 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🎬 Trakt OAuth</h1>
-            <p>Get your Trakt access token for Kometa</p>
+            <h1>📚 MyAnimeList OAuth</h1>
+            <p>Get your MAL access token for Kometa</p>
         </div>
 
         <div id="status" class="status"></div>
@@ -204,22 +204,24 @@
             <div class="instructions">
                 <strong>How it works:</strong>
                 <ol>
-                    <li>Enter your Trakt Client ID and Client Secret</li>
+                    <li>Enter your MyAnimeList Client ID and Client Secret</li>
                     <li>Click "Get Authorization URL" to generate the auth link</li>
-                    <li>Visit the Trakt website and authorize</li>
-                    <li>Copy the PIN code from Trakt</li>
+                    <li>Visit the MyAnimeList website and authorize</li>
+                    <li>Copy the localhost URL (it won't load - that's normal!)</li>
                     <li>Paste it below and submit</li>
                 </ol>
             </div>
 
+            <input type="hidden" id="codeVerifier" value="{{ code_verifier }}">
+
             <div class="form-group">
-                <label for="clientId">Trakt Client ID</label>
+                <label for="clientId">MyAnimeList Client ID</label>
                 <input type="text" id="clientId" placeholder="Enter your Client ID" required>
             </div>
 
             <div class="form-group">
-                <label for="clientSecret">Trakt Client Secret</label>
-                <input type="password" id="clientSecret" placeholder="Enter your Client Secret" required>
+                <label for="clientSecret">MyAnimeList Client Secret</label>
+                <input type="text" id="clientSecret" placeholder="Enter your Client Secret" required>
             </div>
 
             <button class="button primary" onclick="generateAuthUrl()" id="generateBtn">Get Authorization URL</button>
@@ -234,8 +236,11 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="pinCode">PIN Code (from Trakt)</label>
-                    <input type="text" id="pinCode" placeholder="Enter the PIN from Trakt" required>
+                    <label for="localhostUrl">Localhost URL (from redirect)</label>
+                    <input type="text" id="localhostUrl" placeholder="http://localhost/?code=..." required>
+                    <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
+                        After authorizing, you'll be redirected to a localhost URL that won't load. Copy the entire URL and paste it here.
+                    </p>
                 </div>
 
                 <button class="button primary" onclick="submitAuth()" id="submitBtn">Submit</button>
@@ -257,7 +262,7 @@
 
     <script>
         // Detect if we're running behind a proxy with a subdirectory
-        const basePath = window.location.pathname.startsWith('/trakt-oauth') ? '/trakt-oauth' : '';
+        const basePath = window.location.pathname.startsWith('/mal-oauth') ? '/mal-oauth' : '';
 
         function showStatus(message, type = 'info') {
             const statusEl = document.getElementById('status');
@@ -273,14 +278,15 @@
 
         function generateAuthUrl() {
             const clientId = document.getElementById('clientId').value.trim();
+            const codeVerifier = document.getElementById('codeVerifier').value;
 
             if (!clientId) {
                 showStatus('Please enter your Client ID', 'error');
                 return;
             }
 
-            const redirectUri = 'urn:ietf:wg:oauth:2.0:oob';
-            const authUrl = `https://trakt.tv/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+            // MAL uses code_verifier directly as code_challenge (no hashing, no method parameter)
+            const authUrl = `https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=${clientId}&code_challenge=${codeVerifier}`;
 
             document.getElementById('authUrl').value = authUrl;
             document.getElementById('authUrlSection').style.display = 'block';
@@ -295,9 +301,10 @@
         async function submitAuth() {
             const clientId = document.getElementById('clientId').value.trim();
             const clientSecret = document.getElementById('clientSecret').value.trim();
-            const pinCode = document.getElementById('pinCode').value.trim();
+            const localhostUrl = document.getElementById('localhostUrl').value.trim();
+            const codeVerifier = document.getElementById('codeVerifier').value;
 
-            if (!clientId || !clientSecret || !pinCode) {
+            if (!clientId || !clientSecret || !localhostUrl) {
                 showStatus('Please fill in all fields', 'error');
                 return;
             }
@@ -315,23 +322,17 @@
                     body: JSON.stringify({
                         client_id: clientId,
                         client_secret: clientSecret,
-                        code: pinCode,
-                        redirect_uri: 'urn:ietf:wg:oauth:2.0:oob',
+                        localhost_url: localhostUrl,
+                        code_verifier: codeVerifier,
                     }),
                 });
 
-                const responseText = await response.text();
-                let data;
-                try {
-                    data = JSON.parse(responseText);
-                } catch (parseError) {
-                    throw new Error(`Invalid JSON response: ${responseText.substring(0, 100)}`);
-                }
-
                 if (!response.ok) {
-                    throw new Error(data.error || `HTTP ${response.status}`);
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to exchange code');
                 }
 
+                const data = await response.json();
                 displayConfig(clientId, clientSecret, data);
             } catch (error) {
                 showStatus('Error: ' + error.message, 'error');
@@ -340,7 +341,7 @@
         }
 
         function displayConfig(clientId, clientSecret, tokenData) {
-            const config = `trakt:
+            const config = `mal:
   client_id: ${clientId}
   client_secret: ${clientSecret}
   authorization:
@@ -348,8 +349,8 @@
     token_type: ${tokenData.token_type}
     expires_in: ${tokenData.expires_in}
     refresh_token: ${tokenData.refresh_token}
-    scope: public
-    created_at: ${tokenData.created_at}`;
+  localhost_url: ${tokenData.localhost_url}
+  cache_expiration: 60`;
 
             document.getElementById('configOutput').textContent = config;
             document.getElementById('authForm').style.display = 'none';
@@ -370,7 +371,7 @@
         function resetForm() {
             document.getElementById('clientId').value = '';
             document.getElementById('clientSecret').value = '';
-            document.getElementById('pinCode').value = '';
+            document.getElementById('localhostUrl').value = '';
             document.getElementById('authUrl').value = '';
             document.getElementById('authUrlSection').style.display = 'none';
             document.getElementById('authForm').style.display = 'block';
