@@ -25,6 +25,7 @@ def get_plex_pin():
             f"{PLEX_API_URL}/pins",
             json={
                 "strong": True,
+                "label": "Kometa Utilities",
             },
             headers={
                 "Accept": "application/json",
