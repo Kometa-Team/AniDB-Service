@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trakt OAuth - Kometa</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #ED1C24 0%, #B5090D 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 1rem;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #ED1C24;
+        }
+
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 5px;
+            text-align: center;
+            display: none;
+        }
+
+        .status.info {
+            background: #e3f2fd;
+            color: #1565c0;
+            border: 1px solid #90caf9;
+        }
+
+        .status.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #81c784;
+        }
+
+        .status.error {
+            background: #ffebee;
+            color: #c62828;
+            border: 1px solid #ef5350;
+        }
+
+        .button {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin: 10px 0;
+        }
+
+        .button.primary {
+            background: #ED1C24;
+            color: white;
+        }
+
+        .button.primary:hover {
+            background: #B5090D;
+        }
+
+        .button.primary:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .button.secondary {
+            background: #f0f0f0;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+
+        .button.secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .instructions {
+            background: #fff4f4;
+            border-left: 4px solid #ED1C24;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 3px;
+            font-size: 0.9rem;
+            color: #333;
+        }
+
+        .instructions ol {
+            margin-left: 20px;
+        }
+
+        .instructions li {
+            margin: 8px 0;
+        }
+
+        .result-section {
+            display: none;
+            margin-top: 20px;
+        }
+
+        .config-output {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 0.85rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .copy-btn {
+            background: #4caf50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+        }
+
+        .copy-btn:hover {
+            background: #45a049;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            font-size: 0.85rem;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎬 Trakt OAuth</h1>
+            <p>Get your Trakt access token for Kometa</p>
+        </div>
+
+        <div id="status" class="status"></div>
+
+        <div id="authForm">
+            <div class="instructions">
+                <strong>How it works:</strong>
+                <ol>
+                    <li>Enter your Trakt Client ID and Client Secret</li>
+                    <li>Click "Get Authorization URL" to generate the auth link</li>
+                    <li>Visit the Trakt website and authorize</li>
+                    <li>Copy the PIN code from Trakt</li>
+                    <li>Paste it below and submit</li>
+                </ol>
+            </div>
+
+            <div class="form-group">
+                <label for="clientId">Trakt Client ID</label>
+                <input type="text" id="clientId" placeholder="Enter your Client ID" required>
+            </div>
+
+            <div class="form-group">
+                <label for="clientSecret">Trakt Client Secret</label>
+                <input type="password" id="clientSecret" placeholder="Enter your Client Secret" required>
+            </div>
+
+            <button class="button primary" onclick="generateAuthUrl()" id="generateBtn">Get Authorization URL</button>
+
+            <div id="authUrlSection" style="display: none;">
+                <div class="form-group">
+                    <label>Authorization URL</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" id="authUrl" readonly style="flex: 1;">
+                        <button class="button secondary" onclick="openAuthUrl()" style="width: auto; padding: 12px 20px;">Open URL</button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="pinCode">PIN Code (from Trakt)</label>
+                    <input type="text" id="pinCode" placeholder="Enter the PIN from Trakt" required>
+                </div>
+
+                <button class="button primary" onclick="submitAuth()" id="submitBtn">Submit</button>
+            </div>
+        </div>
+
+        <div id="resultSection" class="result-section">
+            <h3 style="color: #333; margin-bottom: 15px;">✅ Configuration Ready</h3>
+            <p style="color: #666; margin-bottom: 10px;">Copy and paste this into your Kometa config.yml:</p>
+            <div class="config-output" id="configOutput"></div>
+            <button class="copy-btn" onclick="copyConfig()">📋 Copy Configuration</button>
+            <button class="button secondary" onclick="resetForm()" style="margin-top: 15px;">Get Another Token</button>
+        </div>
+
+        <div class="footer">
+            <p>For use with Kometa</p>
+        </div>
+    </div>
+
+    <script>
+        function showStatus(message, type = 'info') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+            statusEl.style.display = 'block';
+        }
+
+        function hideStatus() {
+            const statusEl = document.getElementById('status');
+            statusEl.style.display = 'none';
+        }
+
+        function generateAuthUrl() {
+            const clientId = document.getElementById('clientId').value.trim();
+
+            if (!clientId) {
+                showStatus('Please enter your Client ID', 'error');
+                return;
+            }
+
+            const redirectUri = 'urn:ietf:wg:oauth:2.0:oob';
+            const authUrl = `https://trakt.tv/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+
+            document.getElementById('authUrl').value = authUrl;
+            document.getElementById('authUrlSection').style.display = 'block';
+            showStatus('Authorization URL generated. Click "Open URL" to authenticate.', 'success');
+        }
+
+        function openAuthUrl() {
+            const authUrl = document.getElementById('authUrl').value;
+            window.open(authUrl, '_blank');
+        }
+
+        async function submitAuth() {
+            const clientId = document.getElementById('clientId').value.trim();
+            const clientSecret = document.getElementById('clientSecret').value.trim();
+            const pinCode = document.getElementById('pinCode').value.trim();
+
+            if (!clientId || !clientSecret || !pinCode) {
+                showStatus('Please fill in all fields', 'error');
+                return;
+            }
+
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            showStatus('Exchanging code for token...', 'info');
+
+            try {
+                const response = await fetch('/api/exchange-code', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        client_id: clientId,
+                        client_secret: clientSecret,
+                        code: pinCode,
+                        redirect_uri: 'urn:ietf:wg:oauth:2.0:oob',
+                    }),
+                });
+
+                const responseText = await response.text();
+                let data;
+                try {
+                    data = JSON.parse(responseText);
+                } catch (parseError) {
+                    throw new Error(`Invalid JSON response: ${responseText.substring(0, 100)}`);
+                }
+
+                if (!response.ok) {
+                    throw new Error(data.error || `HTTP ${response.status}`);
+                }
+
+                displayConfig(clientId, clientSecret, data);
+            } catch (error) {
+                showStatus('Error: ' + error.message, 'error');
+                submitBtn.disabled = false;
+            }
+        }
+
+        function displayConfig(clientId, clientSecret, tokenData) {
+            const config = `trakt:
+  client_id: ${clientId}
+  client_secret: ${clientSecret}
+  authorization:
+    access_token: ${tokenData.access_token}
+    token_type: ${tokenData.token_type}
+    expires_in: ${tokenData.expires_in}
+    refresh_token: ${tokenData.refresh_token}
+    scope: public
+    created_at: ${tokenData.created_at}`;
+
+            document.getElementById('configOutput').textContent = config;
+            document.getElementById('authForm').style.display = 'none';
+            document.getElementById('resultSection').style.display = 'block';
+            hideStatus();
+        }
+
+        function copyConfig() {
+            const configText = document.getElementById('configOutput').textContent;
+            navigator.clipboard.writeText(configText).then(() => {
+                showStatus('✓ Configuration copied to clipboard!', 'success');
+                setTimeout(hideStatus, 3000);
+            }).catch(() => {
+                showStatus('Error copying configuration', 'error');
+            });
+        }
+
+        function resetForm() {
+            document.getElementById('clientId').value = '';
+            document.getElementById('clientSecret').value = '';
+            document.getElementById('pinCode').value = '';
+            document.getElementById('authUrl').value = '';
+            document.getElementById('authUrlSection').style.display = 'none';
+            document.getElementById('authForm').style.display = 'block';
+            document.getElementById('resultSection').style.display = 'none';
+            document.getElementById('submitBtn').disabled = false;
+            hideStatus();
+        }
+    </script>
+</body>
+</html>
