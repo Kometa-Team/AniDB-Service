@@ -296,7 +296,7 @@
             showStatus('Getting PIN from Plex...', 'info');
 
             try {
-                const response = await fetch('./api/start-auth', {
+                const response = await fetch('/plex-oauth/api/start-auth', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -329,7 +329,7 @@
         function pollForAuth() {
             pollInterval = setInterval(async () => {
                 try {
-                    const response = await fetch(`./api/check-auth/${currentPinId}`);
+                    const response = await fetch(`/plex-oauth/api/check-auth/${currentPinId}`);
 
                     if (!response.ok) {
                         throw new Error('Failed to check auth status');
