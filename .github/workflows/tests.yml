@@ -82,5 +82,5 @@ jobs:
       continue-on-error: true
 
     - name: Run mypy
-      run: mypy main.py --ignore-missing-imports
+      run: mypy main.py --ignore-missing-imports --install-types
       continue-on-error: true

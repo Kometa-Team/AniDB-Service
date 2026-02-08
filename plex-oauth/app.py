@@ -1,60 +1,157 @@
 """
-Plex OAuth Flask Application
-Coming Soon
+Plex OAuth Flask Application.
+
+A minimal Flask web application for authenticating with Plex and obtaining access tokens.
 """
 
-from flask import Flask
+import os
 
-app = Flask(__name__)
+import requests  # type: ignore[import-untyped]
+from flask import Flask, jsonify, render_template
+
+app = Flask(__name__, template_folder="templates")
+app.secret_key = os.getenv("SECRET_KEY", "dev-key-change-in-production")
+
+# Plex API Configuration
+PLEX_IDENTIFIER = "com.kometa.plex-oauth"
+PLEX_VERSION = "1.0.0"
+PLEX_API_URL = "https://plex.tv/api/v2"
+
+
+def get_plex_pin():
+    """Get a PIN from Plex for OAuth flow."""
+    try:
+        response = requests.post(
+            f"{PLEX_API_URL}/pins",
+            json={
+                "strong": True,
+            },
+            headers={
+                "Accept": "application/json",
+                "X-Plex-Client-Identifier": PLEX_IDENTIFIER,
+                "X-Plex-Product": "Kometa Plex OAuth",
+                "X-Plex-Version": PLEX_VERSION,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"Error getting PIN: {e}")
+        return None
+
+
+def check_pin_auth(pin_id):
+    """Check if a PIN has been authorized by the user."""
+    try:
+        response = requests.get(
+            f"{PLEX_API_URL}/pins/{pin_id}",
+            headers={
+                "Accept": "application/json",
+                "X-Plex-Client-Identifier": PLEX_IDENTIFIER,
+                "X-Plex-Product": "Kometa Plex OAuth",
+                "X-Plex-Version": PLEX_VERSION,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"Error checking PIN: {e}")
+        return None
+
+
+def get_user_info(auth_token):
+    """Get user information using an auth token."""
+    try:
+        response = requests.get(
+            f"{PLEX_API_URL}/user",
+            headers={
+                "Accept": "application/json",
+                "X-Plex-Client-Identifier": PLEX_IDENTIFIER,
+                "X-Plex-Product": "Kometa Plex OAuth",
+                "X-Plex-Version": PLEX_VERSION,
+                "X-Plex-Token": auth_token,
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+    except Exception as e:
+        print(f"Error getting user info: {e}")
+        return None
 
 
 @app.route("/")
 def index():
-    """Coming soon page."""
-    return """
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Plex OAuth - Coming Soon</title>
-        <style>
-            body {
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                height: 100vh;
-                margin: 0;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
+    """Render the main page."""
+    return render_template("index.html")
+
+
+@app.route("/api/start-auth", methods=["POST"])
+def start_auth():
+    """Start the Plex authentication flow by getting a PIN."""
+    pin_data = get_plex_pin()
+    if not pin_data:
+        return jsonify({"error": "Failed to get PIN from Plex"}), 500
+
+    return jsonify(
+        {
+            "pin_id": pin_data["id"],
+            "code": pin_data["code"],
+            "auth_url": f"https://app.plex.tv/auth#?clientID={PLEX_IDENTIFIER}&code={pin_data['code']}",
+        }
+    )
+
+
+@app.route("/api/check-auth/<int:pin_id>", methods=["GET"])
+def check_auth(pin_id):
+    """Check if the user has authenticated."""
+    pin_data = check_pin_auth(pin_id)
+    if not pin_data:
+        return jsonify({"error": "Failed to check PIN status"}), 500
+
+    if pin_data.get("authToken"):
+        auth_token = pin_data["authToken"]
+
+        # Fetch user information using the auth token
+        user_data = get_user_info(auth_token)
+
+        if not user_data:
+            return jsonify({"error": "Failed to fetch user information"}), 500
+
+        # Extract user information
+        username = user_data.get("username", "Unknown")
+        user_id = user_data.get("id", "Unknown")
+        email = user_data.get("email", "Unknown")
+        avatar = user_data.get("thumb", None)
+        admin = user_data.get("admin", False)
+        title = user_data.get("title", username)
+
+        return jsonify(
+            {
+                "authenticated": True,
+                "token": auth_token,
+                "username": username,
+                "user_id": user_id,
+                "email": email,
+                "avatar": avatar,
+                "admin": admin,
+                "title": title,
             }
-            .container {
-                text-align: center;
-                padding: 2rem;
-                background: rgba(255, 255, 255, 0.1);
-                border-radius: 10px;
-                backdrop-filter: blur(10px);
-            }
-            h1 { font-size: 3rem; margin: 0 0 1rem 0; }
-            p { font-size: 1.2rem; margin: 0; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <h1>🚧 Coming Soon</h1>
-            <p>Plex OAuth service is currently under development.</p>
-            <p style="margin-top: 2rem;">
-                <a href="https://plex-oauth-0b43dcf08594.herokuapp.com/" 
-                   style="color: white; text-decoration: underline; font-size: 1.1rem;">
-                    Use the existing deployment here →
-                </a>
-            </p>
-        </div>
-    </body>
-    </html>
-    """
+        )
+    else:
+        return jsonify({"authenticated": False})
+
+
+@app.route("/api/health", methods=["GET"])
+def health():
+    """Health check endpoint."""
+    return jsonify({"status": "ok"})
 
 
 if __name__ == "__main__":
-    import os
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port, debug=os.environ.get("DEBUG", "False") == "True")
+    port = int(os.getenv("PORT", 8080))
+    debug = os.getenv("DEBUG", "False").lower() == "true"
+    host = os.getenv("HOST", "127.0.0.1")
+    app.run(host=host, port=port, debug=debug)
