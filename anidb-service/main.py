@@ -343,6 +343,7 @@ app = FastAPI(
     openapi_url="/openapi.json" if ROOT_PATH else "/openapi.json",
     docs_url="/docs" if ROOT_PATH else "/docs",
     redoc_url="/redoc" if ROOT_PATH else "/redoc",
+    redirect_slashes=False,
 )
 
 
@@ -417,6 +418,23 @@ async def root(request: Request):
         <div class="endpoint">
             <strong>GET /tags/{{tag_id}}</strong> - Get anime by tag ID<br>
             <code>curl "{base_url}/tags/36?limit=10"</code>
+        </div>
+
+        <h2>API Documentation</h2>
+
+        <div class="endpoint">
+            <strong><a href="{base_url}/docs">Swagger UI</a></strong> - Interactive API documentation<br>
+            Try out endpoints directly from your browser
+        </div>
+
+        <div class="endpoint">
+            <strong><a href="{base_url}/redoc">ReDoc</a></strong> - Alternative API documentation<br>
+            Clean, readable documentation format
+        </div>
+
+        <div class="endpoint">
+            <strong><a href="{base_url}/openapi.json">OpenAPI Schema</a></strong> - Machine-readable API specification<br>
+            JSON schema for automated tools and clients
         </div>
     </body>
     </html>
