@@ -66,6 +66,8 @@ services:
     restart: always
     container_name: fider-db
     image: postgres:17
+    env_file:
+      - ./features-fider/.env
     volumes:
       - fider-db:/var/lib/postgresql/data
     environment:
@@ -75,6 +77,8 @@ services:
     restart: always
     container_name: features-fider
     image: getfider/fider:stable
+    env_file:
+      - ./features-fider/.env
     ports:
       - "80:3000"
     environment:
