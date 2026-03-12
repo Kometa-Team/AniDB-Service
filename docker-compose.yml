@@ -62,6 +62,40 @@ services:
         reservations:
           memory: 64M
 
+  fider-db:
+    restart: always
+    container_name: fider-db
+    image: postgres:17
+    volumes:
+      - fider-db:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+  features-fider:
+    restart: always
+    container_name: features-fider
+    image: getfider/fider:stable
+    ports:
+      - "80:3000"
+    environment:
+      # Public Host Name
+      BASE_URL: ${BASE_URL}
+
+      # Connection string to the PostgreSQL database
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@fider-db:5432/fider?sslmode=disable
+
+      # Generate a secure secret, for example using https://jwtsecrets.com
+      JWT_SECRET: ${JWT_SECRET}
+
+      # From which account e-mails will be sent
+      EMAIL_NOREPLY: ${EMAIL_NOREPLY}
+
+      EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST}
+      EMAIL_SMTP_PORT: 587
+      EMAIL_SMTP_USERNAME: ${EMAIL_SMTP_USERNAME}
+      EMAIL_SMTP_PASSWORD: ${EMAIL_SMTP_PASSWORDs}
+      EMAIL_SMTP_ENABLE_STARTTLS: 'true'
+
   caddy:
     image: caddy:latest
     container_name: caddy
@@ -81,5 +115,6 @@ services:
 volumes:
   anidb-data:
   anidb-db:
+  fider-db:
   caddy_data:
   caddy_config:
