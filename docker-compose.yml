@@ -69,6 +69,11 @@ services:
       - ./features-fider/.env
     volumes:
       - fider-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   features-fider:
     restart: always
@@ -76,7 +81,9 @@ services:
     image: getfider/fider:stable
     env_file:
       - ./features-fider/.env
-
+    depends_on:
+      fider-db:
+        condition: service_healthy
   caddy:
     image: caddy:latest
     container_name: caddy
