@@ -25,13 +25,16 @@ async def test_seed_db_env(tmp_path):
     
     # Initialize database
     async with aiosqlite.connect(db_path) as db:
-        await db.executescript("""
+        # Mirror the production schema used by seed_db.main and main.init_database
+        await db.executescript(
+            """
             CREATE TABLE IF NOT EXISTS anime (
                 aid INTEGER PRIMARY KEY,
                 last_updated TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS tags (
                 aid INTEGER NOT NULL,
+                tag_id INTEGER,
                 name TEXT NOT NULL,
                 weight INTEGER DEFAULT 0
             );
@@ -45,7 +48,8 @@ async def test_seed_db_env(tmp_path):
                 aid INTEGER,
                 success INTEGER DEFAULT 1
             );
-        """)
+        """
+        )
         await db.commit()
     
     yield xml_dir, db_path, seed_dir
