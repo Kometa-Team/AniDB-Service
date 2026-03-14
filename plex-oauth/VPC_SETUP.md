@@ -40,7 +40,7 @@ Create a file `.elasticbeanstalk/config.yml` with your VPC details (this will be
 global:
   application_name: plex-oauth
   default_region: us-east-1
-  
+
 environment-defaults:
   plex-oauth-env:
     branch: null

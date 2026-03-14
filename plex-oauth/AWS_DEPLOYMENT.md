@@ -16,12 +16,12 @@ AWS Free Tier includes:
    ```bash
    # macOS
    brew install awscli
-   
+
    # Linux
    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
    unzip awscliv2.zip
    sudo ./aws/install
-   
+
    # Windows
    # Download and run: https://awscli.amazonaws.com/AWSCLIV2.msi
    ```

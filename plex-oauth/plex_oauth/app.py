@@ -1,7 +1,7 @@
-"""
-Plex OAuth Flask Application.
+"""Plex OAuth Flask Application.
 
-A minimal Flask web application for authenticating with Plex and obtaining access tokens.
+A minimal Flask web application for authenticating with Plex and obtaining
+access tokens.
 """
 
 import os
@@ -9,7 +9,7 @@ import os
 import requests  # type: ignore[import-untyped]
 from flask import Flask, jsonify, render_template
 
-app = Flask(__name__, template_folder="templates")
+app = Flask(__name__, template_folder="../templates")
 app.secret_key = os.getenv("SECRET_KEY", "dev-key-change-in-production")
 
 # Plex API Configuration
@@ -147,8 +147,8 @@ def check_auth(pin_id):
                 "title": title,
             }
         )
-    else:
-        return jsonify({"authenticated": False})
+
+    return jsonify({"authenticated": False})
 
 
 @app.route("/api/health", methods=["GET"])

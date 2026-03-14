@@ -67,7 +67,7 @@ repos:
         args: [--ignore-missing-imports, --no-strict-optional]
         additional_dependencies:
           - types-aiofiles
-        exclude: ^(tests/|anidb-service/)
+        exclude: ^(tests/|anidb-service/|plex-oauth/|mal-oauth/)
 
   # Type checking with mypy (anidb-service)
   - repo: https://github.com/pre-commit/mirrors-mypy
@@ -78,5 +78,19 @@ repos:
         args: [--ignore-missing-imports, --no-strict-optional]
         additional_dependencies:
           - types-aiofiles
-        files: ^anidb-service/
+        files: ^anidb-service/.*\.py$
         exclude: ^anidb-service/tests?/
+
+      - id: mypy
+        name: mypy (plex-oauth)
+        args: [--ignore-missing-imports, --no-strict-optional]
+        additional_dependencies:
+          - types-aiofiles
+        files: ^plex-oauth/plex_oauth/.*\.py$
+
+      - id: mypy
+        name: mypy (mal-oauth)
+        args: [--ignore-missing-imports, --no-strict-optional]
+        additional_dependencies:
+          - types-aiofiles
+        files: ^mal-oauth/mal_oauth/.*\.py$

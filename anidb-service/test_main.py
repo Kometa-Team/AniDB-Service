@@ -18,7 +18,13 @@ os.environ["ANIDB_PASSWORD"] = "test_anidb_pass"
 os.environ["DAILY_LIMIT"] = "10"
 os.environ["UPDATE_THRESHOLD_DAYS"] = "7"  # Make 10-day cache properly stale
 
-from main import app, check_daily_limit, filter_mature_content, index_xml_to_db, init_database
+from main import (  # noqa: E402
+    app,
+    check_daily_limit,
+    filter_mature_content,
+    index_xml_to_db,
+    init_database,
+)
 
 
 @pytest.fixture

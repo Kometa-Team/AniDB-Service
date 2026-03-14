@@ -1,7 +1,7 @@
-"""
-MyAnimeList OAuth Flask Application.
+"""MyAnimeList OAuth Flask Application.
 
-A minimal Flask web application for authenticating with MyAnimeList and obtaining access tokens.
+A minimal Flask web application for authenticating with MyAnimeList and
+obtaining access tokens.
 """
 
 import os
@@ -10,7 +10,7 @@ import secrets
 import requests  # type: ignore[import-untyped]
 from flask import Flask, jsonify, render_template
 
-app = Flask(__name__, template_folder="templates")
+app = Flask(__name__, template_folder="../templates")
 app.secret_key = os.getenv("SECRET_KEY", "dev-key-change-in-production")
 
 # MAL API Configuration

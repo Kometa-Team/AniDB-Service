@@ -25,7 +25,7 @@ A simple Flask web application for authenticating with MyAnimeList and obtaining
 ### Python
 ```bash
 pip install -r requirements.txt
-python app.py
+python -m mal_oauth.app
 ```
 
 Visit `http://localhost:8080`
@@ -57,3 +57,11 @@ mal-oauth.example.com {
 ## Technical Details
 
 This service uses PKCE (Proof Key for Code Exchange) for secure authentication with MyAnimeList's OAuth2 implementation.
+
+## Testing
+
+From the `mal-oauth` directory:
+
+```bash
+pytest
+```

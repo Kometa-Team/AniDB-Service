@@ -3,17 +3,14 @@
   "dockerComposeFile": "docker-compose.yml",
   "service": "app",
   "workspaceFolder": "/workspace",
-  
-  // Features to install
+
   "features": {
     "ghcr.io/devcontainers/features/git:1": {},
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
 
-  // Configure tool-specific properties
   "customizations": {
     "vscode": {
-      // VS Code extensions to install
       "extensions": [
         "ms-python.python",
         "ms-python.vscode-pylance",
@@ -23,8 +20,6 @@
         "redhat.vscode-yaml",
         "github.copilot"
       ],
-      
-      // VS Code settings
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/bin/python",
         "python.linting.enabled": true,
@@ -51,21 +46,15 @@
       }
     }
   },
-
-  // Use 'forwardPorts' to make a list of ports inside the container available locally
   "forwardPorts": [8000],
-  
-  // Port labels
+
   "portsAttributes": {
     "8000": {
       "label": "AniDB Service API",
       "onAutoForward": "notify"
     }
   },
-
-  // Commands to run after container is created
   "postCreateCommand": "pip install -e '.[dev]' || pip install -r requirements.txt",
 
-  // Comment out to connect as root instead
   "remoteUser": "vscode"
 }
