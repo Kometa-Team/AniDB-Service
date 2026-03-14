@@ -1,0 +1,24 @@
+services:
+  anidb-mirror:
+    pull_policy: build
+    build:
+      context: ./anidb-service
+      dockerfile: Dockerfile
+
+  plex-oauth:
+    pull_policy: build
+    build:
+      context: ./plex-oauth
+      dockerfile: Dockerfile
+
+  trakt-oauth:
+    pull_policy: build
+    build:
+      context: ./trakt-oauth
+      dockerfile: Dockerfile
+
+  mal-oauth:
+    pull_policy: build
+    build:
+      context: ./mal-oauth
+      dockerfile: Dockerfile

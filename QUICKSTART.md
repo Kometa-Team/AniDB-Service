@@ -7,6 +7,14 @@ Get the AniDB Service running in under 5 minutes!
 - Docker & Docker Compose installed
 - Text editor (nano, vim, or VS Code)
 
+## Docker Compose Behavior
+
+The base `docker-compose.yml` references published GHCR images for the utility services.
+
+For local development, Docker Compose automatically loads `docker-compose.override.yml`, which switches those services back to local `build:` contexts.
+
+That means this quickstart still works as expected for local development, and `docker compose up -d --build` remains the recommended command when you want to rebuild local images after code changes.
+
 ## Steps
 
 ### 1. Configure Environment

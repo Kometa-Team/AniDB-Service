@@ -1,0 +1,55 @@
+name: Docker PR Builds
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/docker-pr-build.yml
+      - .github/workflows/docker-build.yml
+      - docker-compose.yml
+      - anidb-service/**
+      - plex-oauth/**
+      - trakt-oauth/**
+      - mal-oauth/**
+
+jobs:
+  build-images:
+    name: Build ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: anidb-mirror
+            context: ./anidb-service
+            file: ./anidb-service/Dockerfile
+          - image: plex-oauth
+            context: ./plex-oauth
+            file: ./plex-oauth/Dockerfile
+          - image: trakt-oauth
+            context: ./trakt-oauth
+            file: ./trakt-oauth/Dockerfile
+          - image: mal-oauth
+            context: ./mal-oauth
+            file: ./mal-oauth/Dockerfile
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.image }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: false
+          tags: kometa-utilities/${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

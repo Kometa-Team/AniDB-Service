@@ -1,6 +1,6 @@
 services:
   anidb-mirror:
-    build: ./anidb-service
+    image: ghcr.io/kometa-team/anidb-mirror:latest
     container_name: anidb-mirror
     restart: unless-stopped
     env_file:
@@ -19,7 +19,7 @@ services:
           memory: 256M
 
   plex-oauth:
-    build: ./plex-oauth
+    image: ghcr.io/kometa-team/plex-oauth:latest
     container_name: plex-oauth
     restart: unless-stopped
     env_file:
@@ -34,7 +34,7 @@ services:
           memory: 64M
 
   trakt-oauth:
-    build: ./trakt-oauth
+    image: ghcr.io/kometa-team/trakt-oauth:latest
     container_name: trakt-oauth
     restart: unless-stopped
     environment:
@@ -48,7 +48,7 @@ services:
           memory: 64M
 
   mal-oauth:
-    build: ./mal-oauth
+    image: ghcr.io/kometa-team/mal-oauth:latest
     container_name: mal-oauth
     restart: unless-stopped
     environment:
@@ -84,6 +84,7 @@ services:
     depends_on:
       fider-db:
         condition: service_healthy
+
   caddy:
     image: caddy:latest
     container_name: caddy
