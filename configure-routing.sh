@@ -33,17 +33,17 @@ case $choice in
         echo "📍 Configuring path-based routing..."
         read -p "Enter domain (e.g., yourdomain.com): " DOMAIN
         read -p "Enter path prefix (e.g., /anidb-service): " PATH_PREFIX
-        
+
         # Remove leading slash if present
         PATH_PREFIX=${PATH_PREFIX#/}
-        
+
         # Update .env
         if grep -q "^ROOT_PATH=" .env; then
             sed -i.bak "s|^ROOT_PATH=.*|ROOT_PATH=/${PATH_PREFIX}|" .env
         else
             echo "ROOT_PATH=/${PATH_PREFIX}" >> .env
         fi
-        
+
         # Update Caddyfile
         cat > Caddyfile <<EOF
 ${DOMAIN} {
@@ -68,7 +68,7 @@ ${DOMAIN} {
     }
 }
 EOF
-        
+
         echo ""
         echo "✅ Configuration updated!"
         echo ""
@@ -83,19 +83,19 @@ EOF
         echo "   2. Restart services: docker compose restart"
         echo "   3. Test: curl https://${DOMAIN}/${PATH_PREFIX}/stats"
         ;;
-        
+
     2)
         echo ""
         echo "🌐 Configuring subdomain routing..."
         read -p "Enter full subdomain (e.g., anidb-service.yourdomain.com): " SUBDOMAIN
-        
+
         # Update .env
         if grep -q "^ROOT_PATH=" .env; then
             sed -i.bak "s|^ROOT_PATH=.*|ROOT_PATH=|" .env
         else
             echo "ROOT_PATH=" >> .env
         fi
-        
+
         # Update Caddyfile
         cat > Caddyfile <<EOF
 ${SUBDOMAIN} {
@@ -112,7 +112,7 @@ ${SUBDOMAIN} {
     reverse_proxy anidb-mirror:8000
 }
 EOF
-        
+
         echo ""
         echo "✅ Configuration updated!"
         echo ""
@@ -127,7 +127,7 @@ EOF
         echo "   2. Restart services: docker compose restart"
         echo "   3. Test: curl https://${SUBDOMAIN}/stats"
         ;;
-        
+
     *)
         echo "❌ Invalid choice"
         exit 1

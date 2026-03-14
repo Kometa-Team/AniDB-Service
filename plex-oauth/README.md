@@ -32,7 +32,7 @@ The easiest way to get started is using VS Code Dev Containers:
 
 3. **Run the app**:
    ```bash
-   uv run python app.py
+   uv run python -m plex_oauth.app
    ```
 
 4. **Open your browser** to `http://localhost:8080`
@@ -65,7 +65,7 @@ See [.devcontainer/README.md](.devcontainer/README.md) for more details.
 
 5. **Run the application**:
    ```bash
-   uv run python app.py
+   uv run python -m plex_oauth.app
    ```
 
 6. **Open your browser** to `http://localhost:8080`

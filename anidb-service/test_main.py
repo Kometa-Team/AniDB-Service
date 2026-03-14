@@ -10,8 +10,6 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
-from main import app, check_daily_limit, filter_mature_content, index_xml_to_db, init_database
-
 # Set test environment variables before importing main
 os.environ["XML_DIR"] = "/tmp/test_anidb/data"
 os.environ["DB_PATH"] = "/tmp/test_anidb/test.db"
@@ -19,6 +17,14 @@ os.environ["ANIDB_USERNAME"] = "test_anidb"
 os.environ["ANIDB_PASSWORD"] = "test_anidb_pass"
 os.environ["DAILY_LIMIT"] = "10"
 os.environ["UPDATE_THRESHOLD_DAYS"] = "7"  # Make 10-day cache properly stale
+
+from main import (  # noqa: E402
+    app,
+    check_daily_limit,
+    filter_mature_content,
+    index_xml_to_db,
+    init_database,
+)
 
 
 @pytest.fixture

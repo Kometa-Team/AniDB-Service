@@ -22,7 +22,7 @@ wheels/
 *.egg
 
 # --- Database & Cache (Crucial) ---
-# We ignore the local database and XML folder so your private 
+# We ignore the local database and XML folder so your private
 # AniDB data stays on your AWS server and doesn't leak to Git.
 database.db
 database.db-journal
