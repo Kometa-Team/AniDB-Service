@@ -70,3 +70,73 @@ def test_exchange_code_for_token_network_error() -> None:
         result = exchange_code_for_token("any-code")
 
     assert result is None
+
+
+def test_callback_success(client) -> None:
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"access_token": "tok_abc123"}
+    mock_response.raise_for_status.return_value = None
+
+    with patch("app.requests.post", return_value=mock_response):
+        response = client.get("/callback?code=auth-code-xyz")
+
+    assert response.status_code == 200
+    html = response.data.decode()
+    assert "tok_abc123" in html
+
+
+def test_callback_error_param(client) -> None:
+    response = client.get("/callback?error=access_denied&error_description=User+denied+access")
+    assert response.status_code == 200
+    html = response.data.decode()
+    assert "User denied access" in html
+
+
+def test_callback_error_param_no_description(client) -> None:
+    response = client.get("/callback?error=access_denied")
+    assert response.status_code == 200
+    html = response.data.decode()
+    assert "access_denied" in html
+
+
+def test_callback_no_code(client) -> None:
+    response = client.get("/callback")
+    assert response.status_code == 200
+    html = response.data.decode()
+    assert "Error" in html or "error" in html
+
+
+def test_callback_exchange_fails(client) -> None:
+    with patch("app.requests.post", side_effect=ConnectionError("timeout")):
+        response = client.get("/callback?code=any-code")
+    assert response.status_code == 200
+    html = response.data.decode()
+    assert "Error" in html or "error" in html
+
+
+def test_callback_exchange_http_error(client) -> None:
+    import requests as req
+
+    mock_response = MagicMock()
+    mock_response.text = '{"error":"invalid_grant"}'
+    http_error = req.exceptions.HTTPError(response=mock_response)
+
+    with patch("app.requests.post", side_effect=http_error):
+        response = client.get("/callback?code=bad-code")
+
+    assert response.status_code == 200
+    html = response.data.decode()
+    assert "Error" in html or "error" in html
+
+
+def test_callback_missing_access_token(client) -> None:
+    mock_response = MagicMock()
+    mock_response.json.return_value = {"token_type": "Bearer"}  # no access_token
+    mock_response.raise_for_status.return_value = None
+
+    with patch("app.requests.post", return_value=mock_response):
+        response = client.get("/callback?code=any-code")
+
+    assert response.status_code == 200
+    html = response.data.decode()
+    assert "Error" in html or "error" in html

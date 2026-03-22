@@ -81,6 +81,40 @@ def index():
     return render_template("index.html", state="default", auth_url=auth_url)
 
 
+@app.route("/callback")
+def callback():
+    """Handle SIMKL OAuth callback."""
+    error = request.args.get("error")
+    if error:
+        error_description = request.args.get("error_description", error)
+        return render_template("index.html", state="error", error_message=error_description)
+
+    code = request.args.get("code")
+    if not code:
+        return render_template(
+            "index.html", state="error", error_message="No authorization code received."
+        )
+
+    token_data = exchange_code_for_token(code)
+    if token_data is None:
+        return render_template(
+            "index.html",
+            state="error",
+            error_message="Failed to connect to SIMKL. Please try again.",
+        )
+
+    if "error" in token_data:
+        return render_template("index.html", state="error", error_message=token_data["error"])
+
+    access_token = token_data.get("access_token")
+    if not access_token:
+        return render_template(
+            "index.html", state="error", error_message="Unexpected response from SIMKL."
+        )
+
+    return render_template("index.html", state="success", user_token=access_token)
+
+
 @app.route("/api/health", methods=["GET"])
 def health():
     """Health check endpoint."""
