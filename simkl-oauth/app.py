@@ -33,6 +33,40 @@ REDIRECT_URI: str = _REDIRECT_URI
 SIMKL_AUTH_URL = "https://simkl.com/oauth/authorize"
 SIMKL_TOKEN_URL = "https://api.simkl.com/oauth/token"  # nosec: B105
 
+
+def exchange_code_for_token(code: str):
+    """Exchange authorization code for SIMKL access token.
+
+    Returns parsed JSON dict on success.
+    Returns dict with 'error' key on HTTP error (non-2xx response).
+    Returns None on connection/unexpected errors.
+    """
+    try:
+        response = requests.post(
+            SIMKL_TOKEN_URL,
+            json={
+                "code": code,
+                "client_id": CLIENT_ID,
+                "client_secret": CLIENT_SECRET,
+                "redirect_uri": REDIRECT_URI,
+                "grant_type": "authorization_code",
+            },
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.HTTPError as e:
+        resp = e.response if hasattr(e, "response") and e.response is not None else None
+        status = resp.status_code if resp is not None else "?"
+        body = resp.text if resp is not None else str(e)
+        print(f"SIMKL API HTTP Error: {e}")
+        return {"error": f"{status}: {body}"}
+    except Exception as e:
+        print(f"Error exchanging code: {e}")
+        return None
+
+
 app = Flask(__name__, template_folder="templates")
 
 
