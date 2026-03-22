@@ -28,7 +28,7 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Visit http://localhost:8080
+Visit `http://localhost:8080`
 
 ### Docker
 
@@ -43,13 +43,13 @@ docker run -p 8080:5000 \
 
 ## Environment Variables
 
-- CLIENT_ID - SIMKL app client ID (required)
-- CLIENT_SECRET - SIMKL app client secret (required)
-- REDIRECT_URI - Callback URL registered in SIMKL app settings (required)
-- ROOT_PATH - Set to /simkl-oauth for path-based routing behind a reverse proxy
-- PORT - Port to run on (default: 8080)
-- HOST - Host to bind to (default: 127.0.0.1)
-- DEBUG - Enable debug mode (default: False)
+- `CLIENT_ID` - SIMKL app client ID (required)
+- `CLIENT_SECRET` - SIMKL app client secret (required)
+- `REDIRECT_URI` - Callback URL registered in SIMKL app settings (required)
+- `ROOT_PATH` - Set to `/simkl-oauth` for path-based routing behind a reverse proxy
+- `PORT` - Port to run on (default: 8080)
+- `HOST` - Host to bind to (default: 127.0.0.1)
+- `DEBUG` - Enable debug mode (default: False)
 
 ## Deployment
 
@@ -57,7 +57,7 @@ This service is designed to be deployed behind a reverse proxy like Caddy.
 
 ### With Caddy
 
-```
+```caddy
 handle /simkl-oauth* {
     uri strip_prefix /simkl-oauth
     reverse_proxy simkl-oauth:5000
