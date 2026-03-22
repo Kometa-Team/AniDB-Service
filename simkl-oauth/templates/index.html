@@ -1,13 +1,226 @@
 <!DOCTYPE html>
 <html lang="en">
-<head><title>SIMKL OAuth</title></head>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SIMKL OAuth - Kometa</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            padding: 40px;
+            max-width: 560px;
+            width: 100%;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 1rem;
+        }
+
+        .instructions {
+            background: #f0fdf9;
+            border-left: 4px solid #1CE8B5;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 3px;
+            font-size: 0.9rem;
+            color: #333;
+        }
+
+        .instructions ol {
+            margin-left: 20px;
+        }
+
+        .instructions li {
+            margin: 8px 0;
+        }
+
+        .button {
+            display: block;
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+            text-align: center;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            margin: 10px 0;
+        }
+
+        .button.primary {
+            background: #1CE8B5;
+            color: #1a1a2e;
+            font-weight: 600;
+        }
+
+        .button.primary:hover {
+            background: #17c99c;
+        }
+
+        .button.secondary {
+            background: #f0f0f0;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+
+        .button.secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .status {
+            margin: 20px 0;
+            padding: 15px;
+            border-radius: 5px;
+            text-align: center;
+        }
+
+        .status.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #81c784;
+        }
+
+        .status.error {
+            background: #ffebee;
+            color: #c62828;
+            border: 1px solid #ef5350;
+        }
+
+        .result-section {
+            margin-top: 20px;
+        }
+
+        .config-output {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            font-family: monospace;
+            font-size: 0.85rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .copy-btn {
+            background: #4caf50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.3s ease;
+            width: 100%;
+            margin-top: 10px;
+        }
+
+        .copy-btn:hover {
+            background: #45a049;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            font-size: 0.85rem;
+            color: #999;
+        }
+
+        .footer a {
+            color: #1CE8B5;
+            text-decoration: none;
+        }
+    </style>
+</head>
 <body>
-{% if state == "default" %}
-  <a href="{{ auth_url }}">Connect with SIMKL</a>
-{% elif state == "success" %}
-  <p>user_token: {{ user_token }}</p>
-{% elif state == "error" %}
-  <p>Error: {{ error_message }}</p>
-{% endif %}
+    <div class="container">
+        <div class="header">
+            <h1>&#127909; SIMKL OAuth</h1>
+            <p>Get your SIMKL access token for Kometa</p>
+        </div>
+
+        {% if state == "default" %}
+        <div class="instructions">
+            <strong>How it works:</strong>
+            <ol>
+                <li>Click "Connect with SIMKL" below</li>
+                <li>Log in and authorize the Kometa app on SIMKL's website</li>
+                <li>You'll be redirected back here with your token</li>
+                <li>Copy the configuration into your Kometa config.yml</li>
+            </ol>
+        </div>
+
+        <a href="{{ auth_url }}" class="button primary">Connect with SIMKL</a>
+
+        {% elif state == "success" %}
+        <div class="status success">
+            &#10003; Authorization successful!
+        </div>
+
+        <div class="result-section">
+            <h3 style="color: #333; margin-bottom: 15px;">&#10003; Configuration Ready</h3>
+            <p style="color: #666; margin-bottom: 10px;">Copy and paste this into your Kometa config.yml:</p>
+            <div class="config-output" id="configOutput">simkl:
+  user_token: {{ user_token }}</div>
+            <button class="copy-btn" onclick="copyConfig()">&#128203; Copy Configuration</button>
+            <a href="/" class="button secondary" style="margin-top: 15px;">Connect Another Account</a>
+        </div>
+
+        {% elif state == "error" %}
+        <div class="status error">
+            <strong>Error:</strong> {{ error_message }}
+        </div>
+
+        <a href="/" class="button secondary">Try Again</a>
+        {% endif %}
+
+        <div class="footer">
+            <p>For use with Kometa</p>
+            <p><a href="/">&#8592; Back to Home</a></p>
+        </div>
+    </div>
+
+    <script>
+        function copyConfig() {
+            const configText = document.getElementById('configOutput').textContent;
+            navigator.clipboard.writeText(configText).then(() => {
+                const btn = document.querySelector('.copy-btn');
+                btn.textContent = '&#10003; Copied!';
+                setTimeout(() => { btn.textContent = '&#128203; Copy Configuration'; }, 3000);
+            }).catch(() => {
+                alert('Could not copy to clipboard. Please copy manually.');
+            });
+        }
+    </script>
 </body>
 </html>
