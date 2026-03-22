@@ -36,6 +36,17 @@ SIMKL_TOKEN_URL = "https://api.simkl.com/oauth/token"  # nosec: B105
 app = Flask(__name__, template_folder="templates")
 
 
+@app.route("/")
+def index():
+    """Render the main page."""
+    auth_url = (
+        f"{SIMKL_AUTH_URL}?response_type=code"
+        f"&client_id={CLIENT_ID}"
+        f"&redirect_uri={REDIRECT_URI}"
+    )
+    return render_template("index.html", state="default", auth_url=auth_url)
+
+
 @app.route("/api/health", methods=["GET"])
 def health():
     """Health check endpoint."""

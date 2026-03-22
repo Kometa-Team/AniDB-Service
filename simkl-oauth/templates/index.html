@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><title>SIMKL OAuth</title></head>
+<body>
+{% if state == "default" %}
+  <a href="{{ auth_url }}">Connect with SIMKL</a>
+{% elif state == "success" %}
+  <p>user_token: {{ user_token }}</p>
+{% elif state == "error" %}
+  <p>Error: {{ error_message }}</p>
+{% endif %}
+</body>
+</html>
