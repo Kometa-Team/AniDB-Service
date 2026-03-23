@@ -276,6 +276,20 @@
     </div>
 
     <script>
+        // All Plex API calls are made directly from the browser so that
+        // requests originate from the user's IP, avoiding Plex's server-IP warning.
+        const PLEX_CLIENT_ID = 'com.kometa.plex-oauth';
+        const PLEX_API = 'https://plex.tv/api/v2';
+        const PLEX_HEADERS = {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'X-Plex-Client-Identifier': PLEX_CLIENT_ID,
+            'X-Plex-Product': 'Kometa',
+            'X-Plex-Version': '1.0.0',
+            'X-Plex-Device': 'Kometa-Utilities',
+            'X-Plex-Platform': 'Web',
+        };
+
         let currentPinId = null;
         let pollInterval = null;
 
@@ -287,8 +301,7 @@
         }
 
         function hideStatus() {
-            const statusEl = document.getElementById('status');
-            statusEl.style.display = 'none';
+            document.getElementById('status').style.display = 'none';
         }
 
         async function startAuth() {
@@ -297,29 +310,28 @@
             showStatus('Getting PIN from Plex...', 'info');
 
             try {
-                const response = await fetch('/plex-oauth/api/start-auth', {
+                // Request a PIN directly from plex.tv (browser → plex.tv, user's IP)
+                const response = await fetch(`${PLEX_API}/pins`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: PLEX_HEADERS,
+                    body: JSON.stringify({ strong: true, label: 'Kometa Utilities' }),
                 });
 
                 if (!response.ok) {
-                    throw new Error('Failed to get PIN');
+                    throw new Error(`Failed to get PIN (${response.status})`);
                 }
 
                 const data = await response.json();
-                currentPinId = data.pin_id;
+                currentPinId = data.id;
 
-                // Display PIN
+                const authUrl = `https://app.plex.tv/auth#?clientID=${PLEX_CLIENT_ID}&code=${data.code}`;
                 document.getElementById('pinCode').textContent = data.code;
-                document.getElementById('authLink').href = data.auth_url;
+                document.getElementById('authLink').href = authUrl;
 
                 document.getElementById('welcomeSection').style.display = 'none';
                 document.getElementById('pinSection').style.display = 'block';
                 hideStatus();
 
-                // Start polling for authentication
                 pollForAuth();
             } catch (error) {
                 showStatus('Error: ' + error.message, 'error');
@@ -330,30 +342,40 @@
         function pollForAuth() {
             pollInterval = setInterval(async () => {
                 try {
-                    const response = await fetch(`/plex-oauth/api/check-auth/${currentPinId}`);
+                    // Check PIN status directly from plex.tv (browser → plex.tv)
+                    const pinResponse = await fetch(`${PLEX_API}/pins/${currentPinId}`, {
+                        headers: PLEX_HEADERS,
+                    });
 
-                    if (!response.ok) {
-                        throw new Error('Failed to check auth status');
-                    }
+                    if (!pinResponse.ok) throw new Error(`PIN check failed (${pinResponse.status})`);
 
-                    const data = await response.json();
+                    const pinData = await pinResponse.json();
 
-                    if (data.authenticated) {
+                    if (pinData.authToken) {
                         clearInterval(pollInterval);
+
+                        // Fetch user info directly from plex.tv (browser → plex.tv)
+                        const userResponse = await fetch(`${PLEX_API}/user`, {
+                            headers: { ...PLEX_HEADERS, 'X-Plex-Token': pinData.authToken },
+                        });
+
+                        if (!userResponse.ok) throw new Error(`User info fetch failed (${userResponse.status})`);
+
+                        const user = await userResponse.json();
                         showToken(
-                            data.token,
-                            data.username,
-                            data.user_id,
-                            data.email,
-                            data.avatar,
-                            data.admin,
-                            data.title
+                            pinData.authToken,
+                            user.username || 'Unknown',
+                            user.id || 'Unknown',
+                            user.email || 'Unknown',
+                            user.thumb || null,
+                            user.admin || false,
+                            user.title || user.username || 'Unknown',
                         );
                     }
                 } catch (error) {
                     console.error('Poll error:', error);
                 }
-            }, 2000); // Poll every 2 seconds
+            }, 2000);
         }
 
         function showToken(token, username, userId, email, avatar, admin, title) {
@@ -363,15 +385,8 @@
             document.getElementById('email').textContent = email;
             document.getElementById('title').textContent = title;
 
-            // Display admin badge if user is admin
-            const adminBadge = document.getElementById('adminBadge');
-            if (admin) {
-                adminBadge.style.display = 'inline-block';
-            } else {
-                adminBadge.style.display = 'none';
-            }
+            document.getElementById('adminBadge').style.display = admin ? 'inline-block' : 'none';
 
-            // Display avatar if available
             const avatarDisplay = document.getElementById('avatarDisplay');
             if (avatar) {
                 avatarDisplay.src = avatar;
@@ -397,9 +412,7 @@
 
         function resetApp() {
             currentPinId = null;
-            if (pollInterval) {
-                clearInterval(pollInterval);
-            }
+            if (pollInterval) clearInterval(pollInterval);
 
             document.getElementById('welcomeSection').style.display = 'block';
             document.getElementById('pinSection').style.display = 'none';
