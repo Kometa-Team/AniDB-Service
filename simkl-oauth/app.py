@@ -37,6 +37,9 @@ SIMKL_AUTH_URL = "https://simkl.com/oauth/authorize"
 SIMKL_TOKEN_URL = "https://api.simkl.com/oauth/token"  # nosec B105
 ROOT_PATH = os.getenv("ROOT_PATH", "")
 
+SIMKL_API_PARAMS = {"client_id": CLIENT_ID, "app-name": "kometa", "app-version": "1.0"}
+SIMKL_HEADERS = {"Content-Type": "application/json", "User-Agent": "Kometa-Utilities/1.0"}
+
 
 def exchange_code_for_token(code: str):
     """Exchange authorization code for SIMKL access token.
@@ -48,6 +51,7 @@ def exchange_code_for_token(code: str):
     try:
         response = requests.post(
             SIMKL_TOKEN_URL,
+            params=SIMKL_API_PARAMS,
             json={
                 "code": code,
                 "client_id": CLIENT_ID,
@@ -55,7 +59,7 @@ def exchange_code_for_token(code: str):
                 "redirect_uri": REDIRECT_URI,
                 "grant_type": "authorization_code",
             },
-            headers={"Content-Type": "application/json"},
+            headers=SIMKL_HEADERS,
             timeout=10,
         )
         response.raise_for_status()
@@ -87,6 +91,7 @@ def index():
         f"{SIMKL_AUTH_URL}?response_type=code"
         f"&client_id={CLIENT_ID}"
         f"&redirect_uri={REDIRECT_URI}"
+        f"&app-name=kometa&app-version=1.0"
     )
     return render_template("index.html", state="default", auth_url=auth_url)
 
