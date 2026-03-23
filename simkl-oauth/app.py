@@ -6,8 +6,8 @@ access tokens for use with Kometa.
 
 import os
 
-import requests  # type: ignore[import-untyped]  # noqa: F401
-from flask import Flask, render_template, request  # noqa: F401
+import requests  # type: ignore[import-untyped]
+from flask import Flask, render_template, request
 
 # Validate required env vars at startup
 _CLIENT_ID = os.getenv("CLIENT_ID", "")
@@ -31,7 +31,8 @@ CLIENT_SECRET: str = _CLIENT_SECRET
 REDIRECT_URI: str = _REDIRECT_URI
 
 SIMKL_AUTH_URL = "https://simkl.com/oauth/authorize"
-SIMKL_TOKEN_URL = "https://api.simkl.com/oauth/token"  # nosec: B105
+SIMKL_TOKEN_URL = "https://api.simkl.com/oauth/token"  # nosec B105
+ROOT_PATH = os.getenv("ROOT_PATH", "")
 
 
 def exchange_code_for_token(code: str):
@@ -68,6 +69,12 @@ def exchange_code_for_token(code: str):
 
 
 app = Flask(__name__, template_folder="templates")
+
+
+@app.context_processor
+def inject_root_path() -> dict:
+    """Inject ROOT_PATH into all templates."""
+    return {"root_path": ROOT_PATH}
 
 
 @app.route("/")

@@ -115,8 +115,6 @@ def test_callback_exchange_fails(client) -> None:
 
 
 def test_callback_exchange_http_error(client) -> None:
-    import requests as req
-
     mock_response = MagicMock()
     mock_response.text = '{"error":"invalid_grant"}'
     http_error = req.exceptions.HTTPError(response=mock_response)

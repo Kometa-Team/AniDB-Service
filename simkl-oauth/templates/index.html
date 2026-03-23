@@ -193,7 +193,7 @@
             <div class="config-output" id="configOutput">simkl:
   user_token: {{ user_token }}</div>
             <button class="copy-btn" onclick="copyConfig()">&#128203; Copy Configuration</button>
-            <a href="/" class="button secondary" style="margin-top: 15px;">Connect Another Account</a>
+            <a href="{{ root_path }}/" class="button secondary" style="margin-top: 15px;">Connect Another Account</a>
         </div>
 
         {% elif state == "error" %}
@@ -201,7 +201,7 @@
             <strong>Error:</strong> {{ error_message }}
         </div>
 
-        <a href="/" class="button secondary">Try Again</a>
+        <a href="{{ root_path }}/" class="button secondary">Try Again</a>
         {% endif %}
 
         <div class="footer">
