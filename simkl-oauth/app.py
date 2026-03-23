@@ -5,6 +5,7 @@ access tokens for use with Kometa.
 """
 
 import os
+from urllib.parse import urlencode
 
 import requests  # type: ignore[import-untyped]
 from dotenv import load_dotenv
@@ -87,12 +88,7 @@ def inject_root_path() -> dict:
 @app.route("/")
 def index():
     """Render the main page."""
-    auth_url = (
-        f"{SIMKL_AUTH_URL}?response_type=code"
-        f"&client_id={CLIENT_ID}"
-        f"&redirect_uri={REDIRECT_URI}"
-        f"&app-name=kometa&app-version=1.0"
-    )
+    auth_url = f"{SIMKL_AUTH_URL}?{urlencode({'response_type': 'code', 'redirect_uri': REDIRECT_URI, **SIMKL_API_PARAMS})}"
     return render_template("index.html", state="default", auth_url=auth_url)
 
 

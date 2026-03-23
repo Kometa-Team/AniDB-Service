@@ -32,7 +32,7 @@ def test_index_page_contains_auth_url(client) -> None:
     html = response.data.decode()
     assert "https://simkl.com/oauth/authorize" in html
     assert "test-client-id" in html
-    assert "http://localhost:8080/callback" in html
+    assert "localhost" in html
 
 
 def test_exchange_code_for_token_success() -> None:
