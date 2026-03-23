@@ -1,1 +1,1 @@
-
+"""trakt-oauth package."""
