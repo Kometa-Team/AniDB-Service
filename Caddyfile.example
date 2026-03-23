@@ -72,6 +72,16 @@ yourdomain.com {
         reverse_proxy mal-oauth:5000
     }
 
+    # Handle /simkl-oauth path
+    # Flask app for SIMKL OAuth authentication
+    # Note: /callback is browser-driven (not called by external servers),
+    # so no special basicauth bypass is needed — the user's browser session
+    # handles auth transparently.
+    handle /simkl-oauth* {
+        uri strip_prefix /simkl-oauth
+        reverse_proxy simkl-oauth:5000
+    }
+
     # Handle root path - serve static landing page
     handle / {
         root * /var/www/html

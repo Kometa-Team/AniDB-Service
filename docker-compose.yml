@@ -61,6 +61,22 @@ services:
         reservations:
           memory: 64M
 
+  simkl-oauth:
+    image: ghcr.io/kometa-team/simkl-oauth:latest
+    container_name: simkl-oauth
+    restart: unless-stopped
+    environment:
+      - ROOT_PATH=/simkl-oauth
+      - CLIENT_ID=${SIMKL_CLIENT_ID:?SIMKL_CLIENT_ID must be set in .env}
+      - CLIENT_SECRET=${SIMKL_CLIENT_SECRET:?SIMKL_CLIENT_SECRET must be set in .env}
+      - REDIRECT_URI=${SIMKL_REDIRECT_URI:?SIMKL_REDIRECT_URI must be set in .env}
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
   fider-db:
     restart: always
     container_name: fider-db
