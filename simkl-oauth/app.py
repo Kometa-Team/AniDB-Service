@@ -7,7 +7,10 @@ access tokens for use with Kometa.
 import os
 
 import requests  # type: ignore[import-untyped]
+from dotenv import load_dotenv
 from flask import Flask, render_template, request
+
+load_dotenv()
 
 # Validate required env vars at startup
 _CLIENT_ID = os.getenv("CLIENT_ID", "")
