@@ -67,7 +67,7 @@ repos:
         args: [--ignore-missing-imports, --no-strict-optional]
         additional_dependencies:
           - types-aiofiles
-        exclude: ^(tests/|anidb-service/|plex-oauth/|mal-oauth/|simkl-oauth/|trakt-oauth/)
+        exclude: ^(tests/|anidb-service/|plex-oauth/|mal-oauth/|trakt-oauth/|simkl-oauth/|simkl-service/)
 
   # Type checking with mypy (anidb-service)
   - repo: https://github.com/pre-commit/mirrors-mypy
@@ -80,6 +80,14 @@ repos:
           - types-aiofiles
         files: ^anidb-service/.*\.py$
         exclude: ^anidb-service/tests?/
+
+      - id: mypy
+        name: mypy (simkl-service)
+        args: [--ignore-missing-imports, --no-strict-optional]
+        additional_dependencies:
+          - types-aiofiles
+        files: ^simkl-service/.*\.py$
+        exclude: ^simkl-service/tests?/
 
       - id: mypy
         name: mypy (plex-oauth)
@@ -96,14 +104,14 @@ repos:
         files: ^mal-oauth/mal_oauth/.*\.py$
 
       - id: mypy
-        name: mypy (trakt-oauth)
+        name: mypy (trakt_oauth)
         args: [--ignore-missing-imports, --no-strict-optional]
         additional_dependencies:
           - types-aiofiles
         files: ^trakt-oauth/trakt_oauth/.*\.py$
 
       - id: mypy
-        name: mypy (simkl-oauth)
+        name: mypy (simkl_oauth)
         args: [--ignore-missing-imports, --no-strict-optional]
         additional_dependencies:
           - types-aiofiles

@@ -9,7 +9,7 @@ import requests as req  # type: ignore[import-untyped]
 @pytest.fixture()
 def client():
     """Flask test client."""
-    from app import app
+    from simkl_oauth.app import app
 
     app.config["TESTING"] = True
     with app.test_client() as c:
@@ -36,26 +36,26 @@ def test_index_page_contains_auth_url(client) -> None:
 
 
 def test_exchange_code_for_token_success() -> None:
-    from app import exchange_code_for_token
+    from simkl_oauth.app import exchange_code_for_token
 
     mock_response = MagicMock()
     mock_response.json.return_value = {"access_token": "tok_abc123"}
     mock_response.raise_for_status.return_value = None
 
-    with patch("app.requests.post", return_value=mock_response):
+    with patch("simkl_oauth.app.requests.post", return_value=mock_response):
         result = exchange_code_for_token("auth-code-xyz")
 
     assert result == {"access_token": "tok_abc123"}
 
 
 def test_exchange_code_for_token_http_error() -> None:
-    from app import exchange_code_for_token
+    from simkl_oauth.app import exchange_code_for_token
 
     mock_response = MagicMock()
     mock_response.text = '{"error":"invalid_grant"}'
     http_error = req.exceptions.HTTPError(response=mock_response)
 
-    with patch("app.requests.post", side_effect=http_error):
+    with patch("simkl_oauth.app.requests.post", side_effect=http_error):
         result = exchange_code_for_token("bad-code")
 
     assert result is not None
@@ -64,9 +64,9 @@ def test_exchange_code_for_token_http_error() -> None:
 
 
 def test_exchange_code_for_token_network_error() -> None:
-    from app import exchange_code_for_token
+    from simkl_oauth.app import exchange_code_for_token
 
-    with patch("app.requests.post", side_effect=ConnectionError("timeout")):
+    with patch("simkl_oauth.app.requests.post", side_effect=ConnectionError("timeout")):
         result = exchange_code_for_token("any-code")
 
     assert result is None
@@ -77,7 +77,7 @@ def test_callback_success(client) -> None:
     mock_response.json.return_value = {"access_token": "tok_abc123"}
     mock_response.raise_for_status.return_value = None
 
-    with patch("app.requests.post", return_value=mock_response):
+    with patch("simkl_oauth.app.requests.post", return_value=mock_response):
         response = client.get("/callback?code=auth-code-xyz")
 
     assert response.status_code == 200
@@ -107,7 +107,7 @@ def test_callback_no_code(client) -> None:
 
 
 def test_callback_exchange_fails(client) -> None:
-    with patch("app.requests.post", side_effect=ConnectionError("timeout")):
+    with patch("simkl_oauth.app.requests.post", side_effect=ConnectionError("timeout")):
         response = client.get("/callback?code=any-code")
     assert response.status_code == 200
     html = response.data.decode()
@@ -119,7 +119,7 @@ def test_callback_exchange_http_error(client) -> None:
     mock_response.text = '{"error":"invalid_grant"}'
     http_error = req.exceptions.HTTPError(response=mock_response)
 
-    with patch("app.requests.post", side_effect=http_error):
+    with patch("simkl_oauth.app.requests.post", side_effect=http_error):
         response = client.get("/callback?code=bad-code")
 
     assert response.status_code == 200
@@ -132,7 +132,7 @@ def test_callback_missing_access_token(client) -> None:
     mock_response.json.return_value = {"token_type": "Bearer"}  # no access_token
     mock_response.raise_for_status.return_value = None
 
-    with patch("app.requests.post", return_value=mock_response):
+    with patch("simkl_oauth.app.requests.post", return_value=mock_response):
         response = client.get("/callback?code=any-code")
 
     assert response.status_code == 200

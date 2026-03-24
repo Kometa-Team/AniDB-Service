@@ -13,6 +13,7 @@ on:
       - trakt-oauth/**
       - mal-oauth/**
       - simkl-oauth/**
+      - simkl-service/**
 
 jobs:
   build-images:
@@ -40,6 +41,9 @@ jobs:
           - image: simkl-oauth
             context: ./simkl-oauth
             file: ./simkl-oauth/Dockerfile
+          - image: simkl-service
+            context: ./simkl-service
+            file: ./simkl-service/Dockerfile
 
     steps:
       - name: Check out repository

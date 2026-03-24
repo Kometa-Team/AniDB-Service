@@ -76,7 +76,7 @@ def exchange_code_for_token(code: str):
         return None
 
 
-app = Flask(__name__, template_folder="templates")
+app = Flask(__name__, template_folder="../templates")
 
 
 @app.context_processor

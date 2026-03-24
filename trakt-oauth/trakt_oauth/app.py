@@ -9,7 +9,7 @@ import os
 import requests  # type: ignore[import-untyped]
 from flask import Flask, jsonify, render_template, request
 
-app = Flask(__name__, template_folder="templates")
+app = Flask(__name__, template_folder="../templates")
 app.secret_key = os.getenv("SECRET_KEY", "dev-key-change-in-production")
 
 # Trakt API Configuration
