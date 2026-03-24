@@ -476,6 +476,7 @@ def test_stats_returns_online_with_db(tmp_path, monkeypatch):
     data = response.json()
     assert data["status"] == "online"
     assert "last_refresh" in data
+    assert data["last_refresh"] == "2026-03-24T03:00:00+00:00"
     for table in (
         "title_basics",
         "title_ratings",

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import aiosqlite
+import charts
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
@@ -21,8 +22,6 @@ MIN_VOTES_CHART = int(os.getenv("MIN_VOTES_CHART", "25000"))
 # --- Global state ---
 last_refresh: Optional[str] = None  # ISO 8601 UTC string
 refresh_worker_task: Optional[asyncio.Task] = None
-
-import charts  # noqa: E402
 
 
 @asynccontextmanager
@@ -78,11 +77,14 @@ async def _run_import_pipeline() -> None:
     gz_paths = await download_datasets(DATA_DIR)
     await asyncio.to_thread(run_full_import, gz_paths, DB_PATH)
 
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("SELECT value FROM import_meta WHERE key = 'last_refresh'")
-        row = await cursor.fetchone()
-        if row:
-            last_refresh = row[0]
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute("SELECT value FROM import_meta WHERE key = 'last_refresh'")
+            row = await cursor.fetchone()
+            if row:
+                last_refresh = row[0]
+    except Exception as e:
+        print(f"⚠️  Could not read last_refresh after import: {e}")
 
     await asyncio.to_thread(charts.rebuild_all_charts, DB_PATH, MIN_VOTES_CHART)
     print("✅ Refresh complete")
