@@ -284,3 +284,101 @@ def test_run_full_import_leaves_live_db_on_failure(tmp_path):
     val = conn.execute("SELECT val FROM sentinel").fetchone()[0]
     assert val == "original"
     conn.close()
+
+
+def _seed_db_for_charts(db_path):
+    """Seed a test DB with data for chart tests."""
+    conn = sqlite3.connect(db_path)
+    from importer import create_schema
+
+    create_schema(conn)
+    movies = [
+        ("tt0000001", "movie", "Alpha", "Alpha", 0, 2000, None, 120, "Action"),
+        ("tt0000002", "movie", "Beta", "Beta", 0, 2001, None, 90, "Drama"),
+        ("tt0000003", "movie", "Gamma", "Gamma", 0, 2002, None, 100, "Comedy"),
+        ("tt0000004", "tvSeries", "Delta", "Delta", 0, 2003, 2005, None, "Drama"),
+        ("tt0000005", "tvSeries", "Epsilon", "Epsilon", 0, 2004, None, None, "Action"),
+    ]
+    conn.executemany("INSERT INTO title_basics VALUES (?,?,?,?,?,?,?,?,?)", movies)
+    ratings = [
+        ("tt0000001", 8.5, 30000),
+        ("tt0000002", 7.0, 40000),
+        ("tt0000003", 6.5, 35000),
+        ("tt0000004", 9.0, 50000),
+        ("tt0000005", 8.0, 60000),
+    ]
+    conn.executemany("INSERT INTO title_ratings VALUES (?,?,?)", ratings)
+    # English akas for tt0000001 and tt0000002 only
+    conn.execute("INSERT INTO title_akas VALUES ('tt0000001',1,'Alpha','US','en',NULL,NULL,1)")
+    conn.execute("INSERT INTO title_akas VALUES ('tt0000002',1,'Beta','US','en',NULL,NULL,1)")
+    conn.commit()
+    conn.close()
+
+
+def test_rebuild_all_charts_populates_cache(tmp_path):
+    db_path = tmp_path / "imdb.db"
+    _seed_db_for_charts(db_path)
+    import charts
+
+    charts.rebuild_all_charts(db_path, min_votes=25000)
+    assert "top_movies" in charts.chart_cache
+    assert "top_shows" in charts.chart_cache
+    assert len(charts.chart_cache["top_movies"]) <= 3  # 3 movies with votes >= 25000
+    assert len(charts.chart_cache["top_shows"]) <= 2  # 2 tvSeries with votes >= 25000
+
+
+def test_top_movies_chart_sorted_by_weighted_rating(tmp_path):
+    db_path = tmp_path / "imdb.db"
+    _seed_db_for_charts(db_path)
+    import charts
+
+    charts.rebuild_all_charts(db_path, min_votes=25000)
+    top = charts.chart_cache["top_movies"]
+    ratings = [item["averageRating"] for item in top]
+    assert ratings == sorted(ratings, reverse=True)
+
+
+def test_lowest_rated_chart_is_ascending(tmp_path):
+    db_path = tmp_path / "imdb.db"
+    _seed_db_for_charts(db_path)
+    import charts
+
+    charts.rebuild_all_charts(db_path, min_votes=25000)
+    bottom = charts.chart_cache["lowest_rated"]
+    ratings = [item["averageRating"] for item in bottom]
+    assert ratings == sorted(ratings)
+
+
+def test_top_english_only_includes_english_titles(tmp_path):
+    db_path = tmp_path / "imdb.db"
+    _seed_db_for_charts(db_path)
+    import charts
+
+    charts.rebuild_all_charts(db_path, min_votes=25000)
+    english = charts.chart_cache["top_english"]
+    tconsts = {item["tconst"] for item in english}
+    assert "tt0000001" in tconsts
+    assert "tt0000002" in tconsts
+    assert "tt0000003" not in tconsts  # no en aka
+
+
+def test_chart_items_have_required_fields(tmp_path):
+    db_path = tmp_path / "imdb.db"
+    _seed_db_for_charts(db_path)
+    import charts
+
+    charts.rebuild_all_charts(db_path, min_votes=25000)
+    item = charts.chart_cache["top_movies"][0]
+    for field in ("tconst", "primaryTitle", "startYear", "averageRating", "numVotes", "rank"):
+        assert field in item, f"Missing field: {field}"
+
+
+def test_chart_cache_replaced_atomically(tmp_path):
+    db_path = tmp_path / "imdb.db"
+    _seed_db_for_charts(db_path)
+    import charts
+
+    charts.chart_cache = {"stale_key": [{"tconst": "ttOLD"}]}
+    charts.rebuild_all_charts(db_path, min_votes=25000)
+    assert "stale_key" not in charts.chart_cache
+    assert "top_movies" in charts.chart_cache
