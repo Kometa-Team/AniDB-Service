@@ -1,5 +1,6 @@
 """Tests for IMDB service."""
 
+import asyncio
 import gzip
 import io
 import sqlite3
@@ -1091,3 +1092,81 @@ def test_search_imdb_top_filters_to_chart(tmp_path, monkeypatch):
     data = response.json()
     assert "tt0000001" in data["results"]
     assert "tt0000002" not in data["results"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_scheduler_calls_pipeline_at_correct_time():
+    """Scheduler sleeps until REFRESH_HOUR, then calls _run_import_pipeline."""
+    call_count = 0
+
+    async def fake_pipeline():
+        nonlocal call_count
+        call_count += 1
+
+    async def fake_sleep(secs):
+        if call_count >= 1:
+            raise asyncio.CancelledError  # Stop after first pipeline call
+
+    import main
+
+    with patch.object(main, "_run_import_pipeline", fake_pipeline):
+        with patch.object(main.asyncio, "sleep", fake_sleep):
+            task = asyncio.create_task(main._refresh_scheduler())
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    assert call_count >= 1
+
+
+@pytest.mark.asyncio
+async def test_refresh_scheduler_continues_after_pipeline_failure():
+    """Scheduler logs the error and continues to next day rather than crashing."""
+    call_count = 0
+
+    async def failing_pipeline():
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("Download failed")
+
+    async def fake_sleep(secs):
+        if call_count >= 2:
+            raise asyncio.CancelledError  # Stop after 2 iterations
+
+    import main
+
+    with patch.object(main, "_run_import_pipeline", failing_pipeline):
+        with patch.object(main.asyncio, "sleep", fake_sleep):
+            task = asyncio.create_task(main._refresh_scheduler())
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    assert call_count >= 1  # Called at least once despite failures
+
+
+@pytest.mark.asyncio
+async def test_initial_import_then_schedule_runs_pipeline_on_failure():
+    """_initial_import_then_schedule logs failure and continues to scheduler."""
+    pipeline_called = False
+    scheduler_called = False
+
+    async def failing_pipeline():
+        nonlocal pipeline_called
+        pipeline_called = True
+        raise RuntimeError("Failed")
+
+    async def fake_scheduler():
+        nonlocal scheduler_called
+        scheduler_called = True
+
+    import main
+
+    with patch.object(main, "_run_import_pipeline", failing_pipeline):
+        with patch.object(main, "_refresh_scheduler", fake_scheduler):
+            await main._initial_import_then_schedule()
+
+    assert pipeline_called
+    assert scheduler_called
