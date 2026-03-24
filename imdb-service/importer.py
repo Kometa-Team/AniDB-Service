@@ -2,7 +2,10 @@
 
 import asyncio
 import gzip
+import os
 import sqlite3
+import traceback
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -238,3 +241,125 @@ async def download_datasets(data_dir: Path) -> dict[str, Path]:
         await asyncio.gather(*tasks)
 
     return paths
+
+
+# Maps dataset stem → table name
+STEM_TO_TABLE: dict[str, str] = {
+    "title.basics": "title_basics",
+    "title.ratings": "title_ratings",
+    "title.akas": "title_akas",
+    "title.crew": "title_crew",
+    "title.episode": "title_episode",
+    "title.principals": "title_principals",
+    "name.basics": "name_basics",
+}
+
+# Column definitions per table (must match TSV file column order)
+TABLE_COLUMNS: dict[str, list[str]] = {
+    "title_basics": [
+        "tconst",
+        "titleType",
+        "primaryTitle",
+        "originalTitle",
+        "isAdult",
+        "startYear",
+        "endYear",
+        "runtimeMinutes",
+        "genres",
+    ],
+    "title_ratings": ["tconst", "averageRating", "numVotes"],
+    "title_akas": [
+        "tconst",
+        "ordering",
+        "title",
+        "region",
+        "language",
+        "types",
+        "attributes",
+        "isOriginalTitle",
+    ],
+    "title_crew": ["tconst", "directors", "writers"],
+    "title_episode": ["tconst", "parentTconst", "seasonNumber", "episodeNumber"],
+    "title_principals": ["tconst", "ordering", "nconst", "category", "job", "characters"],
+    "name_basics": [
+        "nconst",
+        "primaryName",
+        "birthYear",
+        "deathYear",
+        "primaryProfession",
+        "knownForTitles",
+    ],
+}
+
+
+def run_full_import(
+    gz_paths: dict[str, Path],
+    live_db: Path,
+    min_rows_override: Optional[int] = None,
+) -> None:
+    """
+    Import all dataset files into a shadow DB, then atomically replace live_db.
+
+    gz_paths: dict mapping dataset stem → local .tsv.gz path
+    live_db: path to the live SQLite DB to replace
+    min_rows_override: if set, use this as min_rows for all tables (0 = no check; for tests)
+    """
+    shadow_db = live_db.parent / "imdb_shadow.db"
+
+    # Clean up any leftover shadow from a previous failed run
+    if shadow_db.exists():
+        shadow_db.unlink()
+
+    conn = None
+    try:
+        conn = sqlite3.connect(shadow_db)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        create_schema(conn)
+        conn.commit()
+
+        for stem, gz_path in gz_paths.items():
+            table = STEM_TO_TABLE.get(stem)
+            if table is None:
+                print(f"Unknown stem {stem!r}, skipping")
+                continue
+            columns = TABLE_COLUMNS[table]
+            min_rows = (
+                min_rows_override if min_rows_override is not None else MIN_ROWS.get(table, 0)
+            )
+            print(f"Importing {stem} -> {table}...")
+            count = import_table(conn, gz_path, table, columns, min_rows)
+            print(f"   {count:,} rows")
+
+        # Record import timestamp
+        conn.execute(
+            "INSERT OR REPLACE INTO import_meta VALUES (?, ?)",
+            ("last_refresh", datetime.now(timezone.utc).isoformat()),
+        )
+        conn.commit()
+        conn.close()
+        conn = None
+
+        # Atomic swap — requires live_db and shadow_db on the same filesystem
+        try:
+            os.replace(shadow_db, live_db)
+        except OSError as e:
+            if e.errno == 18:  # EXDEV: cross-device link
+                raise RuntimeError(
+                    f"Cannot atomically swap {shadow_db} -> {live_db}: different filesystems. "
+                    "Ensure DATA_DIR and TMP_DIR are on the same volume."
+                ) from e
+            raise
+
+        print("Import complete, DB swapped")
+
+    except Exception:
+        if conn:
+            try:
+                conn.close()
+            except Exception:  # nosec B110
+                pass
+        if shadow_db.exists():
+            shadow_db.unlink(missing_ok=True)
+        traceback.print_exc()
+        raise

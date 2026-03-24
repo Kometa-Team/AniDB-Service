@@ -187,3 +187,100 @@ async def test_download_datasets_creates_files(tmp_path):
     for _stem, path in result.items():
         assert path.exists()
         assert path.name.endswith(".tsv.gz")
+
+
+def _make_all_gz_files(tmp_path):
+    """Create minimal valid TSV.gz files for all 7 datasets."""
+    basics_data = _make_tsv_gz(
+        "tconst\ttitleType\tprimaryTitle\toriginalTitle\tisAdult\tstartYear\tendYear\truntimeMinutes\tgenres",
+        [f"tt{i:07d}\tmovie\tTitle {i}\tTitle {i}\t0\t2000\t\\N\t90\tAction" for i in range(1, 6)],
+    )
+    ratings_data = _make_tsv_gz(
+        "tconst\taverageRating\tnumVotes",
+        [f"tt{i:07d}\t{7.0 + i * 0.1:.1f}\t{50000 + i * 1000}" for i in range(1, 6)],
+    )
+    akas_data = _make_tsv_gz(
+        "titleId\tordering\ttitle\tregion\tlanguage\ttypes\tattributes\tisOriginalTitle",
+        [f"tt{i:07d}\t1\tTitle {i}\tUS\ten\t\\N\t\\N\t1" for i in range(1, 6)],
+    )
+    crew_data = _make_tsv_gz(
+        "tconst\tdirectors\twriters",
+        [f"tt{i:07d}\tnm{i:07d}\t\\N" for i in range(1, 6)],
+    )
+    episode_data = _make_tsv_gz(
+        "tconst\tparentTconst\tseasonNumber\tepisodeNumber",
+        [],
+    )
+    principals_data = _make_tsv_gz(
+        "tconst\tordering\tnconst\tcategory\tjob\tcharacters",
+        [f"tt{i:07d}\t1\tnm{i:07d}\tactor\t\\N\t\\N" for i in range(1, 6)],
+    )
+    names_data = _make_tsv_gz(
+        "nconst\tprimaryName\tbirthYear\tdeathYear\tprimaryProfession\tknownForTitles",
+        [f"nm{i:07d}\tPerson {i}\t1970\t\\N\tactor\ttt{i:07d}" for i in range(1, 6)],
+    )
+
+    gz_dir = tmp_path / "gz"
+    gz_dir.mkdir()
+    files = {
+        "title.basics": basics_data,
+        "title.ratings": ratings_data,
+        "title.akas": akas_data,
+        "title.crew": crew_data,
+        "title.episode": episode_data,
+        "title.principals": principals_data,
+        "name.basics": names_data,
+    }
+    gz_paths = {}
+    for stem, data in files.items():
+        path = gz_dir / f"{stem}.tsv.gz"
+        path.write_bytes(data)
+        gz_paths[stem] = path
+    return gz_paths
+
+
+def test_run_full_import_produces_populated_db(tmp_path):
+    gz_paths = _make_all_gz_files(tmp_path)
+    live_db = tmp_path / "imdb.db"
+
+    from importer import run_full_import
+
+    run_full_import(gz_paths, live_db, min_rows_override=0)
+
+    assert live_db.exists()
+    conn = sqlite3.connect(live_db)
+    count = conn.execute("SELECT COUNT(*) FROM title_basics").fetchone()[0]
+    assert count == 5
+    # Verify import_meta has last_refresh
+    row = conn.execute("SELECT value FROM import_meta WHERE key='last_refresh'").fetchone()
+    assert row is not None
+    conn.close()
+
+
+def test_run_full_import_leaves_live_db_on_failure(tmp_path):
+    """If import fails, the original live DB is untouched."""
+    live_db = tmp_path / "imdb.db"
+    # Create a "live" DB with known content
+    conn = sqlite3.connect(live_db)
+    conn.execute("CREATE TABLE sentinel (val TEXT)")
+    conn.execute("INSERT INTO sentinel VALUES ('original')")
+    conn.commit()
+    conn.close()
+
+    # Provide an invalid (not-gzip) file to trigger failure
+    gz_dir = tmp_path / "gz"
+    gz_dir.mkdir()
+    bad_gz = gz_dir / "title.basics.tsv.gz"
+    bad_gz.write_bytes(b"not valid gzip content")
+    gz_paths = {"title.basics": bad_gz}
+
+    from importer import run_full_import
+
+    with pytest.raises(Exception, match="."):  # noqa: B017
+        run_full_import(gz_paths, live_db, min_rows_override=0)
+
+    # Live DB must still be the original
+    conn = sqlite3.connect(live_db)
+    val = conn.execute("SELECT val FROM sentinel").fetchone()[0]
+    assert val == "original"
+    conn.close()
