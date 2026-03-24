@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi.testclient import TestClient
 
 
 def _make_tsv_gz(header: str, rows: list[str]) -> bytes:
@@ -441,3 +442,49 @@ def test_chart_cache_replaced_atomically(tmp_path):
     charts.rebuild_all_charts(db_path, min_votes=25000)
     assert "stale_key" not in charts.chart_cache
     assert "top_movies" in charts.chart_cache
+
+
+def test_stats_returns_initializing_when_no_db(tmp_path, monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "nonexistent.db")
+    monkeypatch.setattr(main, "last_refresh", None)
+    client = TestClient(main.app, raise_server_exceptions=False)
+    response = client.get("/stats")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "initializing"
+
+
+def test_stats_returns_online_with_db(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    conn = sqlite3.connect(db_path)
+    from importer import create_schema
+
+    create_schema(conn)
+    conn.execute("INSERT INTO import_meta VALUES ('last_refresh', '2026-03-24T03:00:00+00:00')")
+    conn.commit()
+    conn.close()
+
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    monkeypatch.setattr(main, "last_refresh", "2026-03-24T03:00:00+00:00")
+    client = TestClient(main.app)
+    response = client.get("/stats")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "online"
+    assert "last_refresh" in data
+    assert "title_basics" in data["table_counts"]
+
+
+def test_root_returns_html(tmp_path, monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "nonexistent.db")
+    client = TestClient(main.app, raise_server_exceptions=False)
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "IMDB" in response.text
