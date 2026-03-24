@@ -77,6 +77,21 @@ services:
         reservations:
           memory: 64M
 
+  simkl-service:
+    image: ghcr.io/kometa-team/simkl-service:latest
+    container_name: simkl-service
+    restart: unless-stopped
+    environment:
+      - ROOT_PATH=/simkl-service
+    volumes:
+      - simkl-data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
   fider-db:
     restart: always
     container_name: fider-db
@@ -101,6 +116,26 @@ services:
       fider-db:
         condition: service_healthy
 
+  comparison-app:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount reference images directory (adjust path as needed for your remote server)
+      - /path/to/Default-Images:/app/ref_images:ro
+      # Mount generated images directory
+      - ./create_defaults/defaults-en:/app/defaults-en:ro
+    environment:
+      # Optional: Set reference directory path
+      REF_DIR: /app/ref_images
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/tree"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
   caddy:
     image: caddy:latest
     container_name: caddy
@@ -120,6 +155,7 @@ services:
 volumes:
   anidb-data:
   anidb-db:
+  simkl-data:
   fider-db:
   caddy_data:
   caddy_config:

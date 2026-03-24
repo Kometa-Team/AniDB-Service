@@ -13,7 +13,7 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.12", "3.13", "3.14"]
-        service: ["anidb-service", "plex-oauth", "trakt-oauth", "mal-oauth", "simkl-oauth"]
+        service: ["anidb-service", "plex-oauth", "trakt-oauth", "mal-oauth", "simkl-oauth", "simkl-service"]
 
     steps:
     - uses: actions/checkout@v6
@@ -50,6 +50,9 @@ jobs:
             ;;
           simkl-oauth)
             pip install -r simkl-oauth/requirements.txt
+            ;;
+          simkl-service)
+            pip install -r simkl-service/requirements.txt
             ;;
           *)
             echo "Unknown service ${{ matrix.service }}, skipping service-specific dependencies"
