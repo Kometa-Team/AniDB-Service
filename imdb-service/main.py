@@ -246,7 +246,7 @@ async def get_chart(chart_name: str, limit: Optional[int] = None) -> Dict[str, A
     if not _db_is_ready() and not charts.chart_cache:
         raise HTTPException(status_code=503, detail="Service initializing")
 
-    if limit is not None and limit > charts.MAX_CHART_SIZE:
+    if limit is not None and (limit < 1 or limit > charts.MAX_CHART_SIZE):
         raise HTTPException(status_code=400, detail=f"limit must be ≤ {charts.MAX_CHART_SIZE}")
 
     results = charts.chart_cache.get(chart_name, [])

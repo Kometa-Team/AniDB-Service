@@ -653,6 +653,7 @@ def test_get_chart_top_movies_returns_list(tmp_path, monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["chart"] == "top_movies"
+    assert data["total"] == 1
     assert len(data["results"]) == 1
     assert data["results"][0]["tconst"] == "tt0111161"
 
@@ -704,6 +705,18 @@ def test_get_chart_returns_404_for_unknown_chart(tmp_path, monkeypatch):
     client = TestClient(main.app)
     response = client.get("/chart/nonexistent_chart")
     assert response.status_code == 404
+
+
+def test_get_chart_rejects_limit_zero(tmp_path, monkeypatch):
+    import charts
+
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "imdb.db")
+    charts.chart_cache = {"top_movies": []}
+    client = TestClient(main.app)
+    response = client.get("/chart/top_movies?limit=0")
+    assert response.status_code == 400
 
 
 def test_get_chart_returns_503_when_initializing(tmp_path, monkeypatch):
