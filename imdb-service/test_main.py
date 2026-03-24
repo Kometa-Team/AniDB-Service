@@ -1097,27 +1097,43 @@ def test_search_imdb_top_filters_to_chart(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_refresh_scheduler_calls_pipeline_at_correct_time():
     """Scheduler sleeps until REFRESH_HOUR, then calls _run_import_pipeline."""
+    from datetime import datetime, timezone
+
     call_count = 0
+    sleep_args = []
+
+    # Mock "now" to be 10:00 UTC. REFRESH_HOUR defaults to 3.
+    # So next target is tomorrow at 03:00 UTC.
+    fake_now = datetime(2026, 3, 24, 10, 0, 0, tzinfo=timezone.utc)
+    expected_target = datetime(2026, 3, 25, 3, 0, 0, tzinfo=timezone.utc)
+    expected_sleep = (expected_target - fake_now).total_seconds()  # 17 hours
+
+    async def fake_sleep(secs):
+        sleep_args.append(secs)
+        # Do not call asyncio.sleep here — it is patched and would recurse.
+        # Returning immediately allows the scheduler to proceed to pipeline call.
 
     async def fake_pipeline():
         nonlocal call_count
         call_count += 1
-
-    async def fake_sleep(secs):
-        if call_count >= 1:
-            raise asyncio.CancelledError  # Stop after first pipeline call
+        raise asyncio.CancelledError  # stop after first pipeline call
 
     import main
 
     with patch.object(main, "_run_import_pipeline", fake_pipeline):
         with patch.object(main.asyncio, "sleep", fake_sleep):
-            task = asyncio.create_task(main._refresh_scheduler())
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+            with patch("main.datetime") as mock_dt:
+                mock_dt.now.return_value = fake_now
+                task = asyncio.create_task(main._refresh_scheduler())
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
     assert call_count >= 1
+    assert len(sleep_args) >= 1
+    # Sleep should be approximately 17 hours (within 60 seconds of expected)
+    assert abs(sleep_args[0] - expected_sleep) < 60
 
 
 @pytest.mark.asyncio
@@ -1144,7 +1160,7 @@ async def test_refresh_scheduler_continues_after_pipeline_failure():
             except asyncio.CancelledError:
                 pass
 
-    assert call_count >= 1  # Called at least once despite failures
+    assert call_count >= 2  # Ran at least twice, proving it continues after failure
 
 
 @pytest.mark.asyncio
