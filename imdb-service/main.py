@@ -234,6 +234,30 @@ async def get_title(imdb_id: str) -> Dict[str, Any]:
     return result
 
 
+@app.get("/chart/{chart_name}")
+async def get_chart(chart_name: str, limit: Optional[int] = None) -> Dict[str, Any]:
+    """Return a pre-computed ranked chart of IMDb titles."""
+    if chart_name not in charts.CHART_CONFIGS:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown chart: {chart_name!r}. Valid: {list(charts.CHART_CONFIGS.keys())}",
+        )
+
+    if not _db_is_ready() and not charts.chart_cache:
+        raise HTTPException(status_code=503, detail="Service initializing")
+
+    if limit is not None and limit > charts.MAX_CHART_SIZE:
+        raise HTTPException(status_code=400, detail=f"limit must be ≤ {charts.MAX_CHART_SIZE}")
+
+    results = charts.chart_cache.get(chart_name, [])
+    if limit is not None:
+        results = results[:limit]
+    else:
+        results = results[: charts.DEFAULT_CHART_SIZE]
+
+    return {"chart": chart_name, "total": len(results), "results": results}
+
+
 @app.get("/person/{imdb_id}")
 async def get_person(imdb_id: str) -> Dict[str, Any]:
     """Return person record by IMDb person ID (e.g. nm0000093)."""

@@ -628,3 +628,91 @@ def test_get_person_returns_503_when_no_db(tmp_path, monkeypatch):
     client = TestClient(main.app, raise_server_exceptions=False)
     response = client.get("/person/nm0001104")
     assert response.status_code == 503
+
+
+def test_get_chart_top_movies_returns_list(tmp_path, monkeypatch):
+    import charts
+
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "imdb.db")
+    charts.chart_cache = {
+        "top_movies": [
+            {
+                "tconst": "tt0111161",
+                "primaryTitle": "Shawshank",
+                "startYear": 1994,
+                "averageRating": 9.3,
+                "numVotes": 2800000,
+                "rank": 1,
+            },
+        ]
+    }
+    client = TestClient(main.app)
+    response = client.get("/chart/top_movies")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["chart"] == "top_movies"
+    assert len(data["results"]) == 1
+    assert data["results"][0]["tconst"] == "tt0111161"
+
+
+def test_get_chart_respects_limit(tmp_path, monkeypatch):
+    import charts
+
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "imdb.db")
+    charts.chart_cache = {
+        "top_movies": [
+            {
+                "tconst": f"tt{i:07d}",
+                "primaryTitle": f"Movie {i}",
+                "startYear": 2000,
+                "averageRating": 8.0,
+                "numVotes": 50000,
+                "rank": i,
+            }
+            for i in range(1, 11)
+        ]
+    }
+    client = TestClient(main.app)
+    response = client.get("/chart/top_movies?limit=3")
+    assert response.status_code == 200
+    assert len(response.json()["results"]) == 3
+
+
+def test_get_chart_rejects_limit_above_max(tmp_path, monkeypatch):
+    import charts
+
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "imdb.db")
+    charts.chart_cache = {"top_movies": []}
+    client = TestClient(main.app)
+    response = client.get("/chart/top_movies?limit=999")
+    assert response.status_code == 400
+
+
+def test_get_chart_returns_404_for_unknown_chart(tmp_path, monkeypatch):
+    import charts
+
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "imdb.db")
+    charts.chart_cache = {}
+    client = TestClient(main.app)
+    response = client.get("/chart/nonexistent_chart")
+    assert response.status_code == 404
+
+
+def test_get_chart_returns_503_when_initializing(tmp_path, monkeypatch):
+    import charts
+
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "nonexistent.db")
+    charts.chart_cache = {}
+    client = TestClient(main.app, raise_server_exceptions=False)
+    response = client.get("/chart/top_movies")
+    assert response.status_code == 503
