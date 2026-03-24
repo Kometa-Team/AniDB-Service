@@ -30,6 +30,7 @@ The goal is to replace Kometa's direct IMDB scraping for the builders that can b
 - `imdb_chart`: `popular_movies`, `popular_shows`, `box_office`, `trending_india`, `trending_tamil`, `trending_telugu`
 - `imdb_search` params: `popularity`, `box_office`, `company`, `keyword`, `content_rating`, `interests`, `event`, `topic`, `character`, `list`
 - `sort_by`: `popularity.asc/desc`, `box_office.asc/desc`
+- Offset/cursor pagination on `/search` (not needed by Kometa builders)
 
 ---
 
@@ -38,7 +39,7 @@ The goal is to replace Kometa's direct IMDB scraping for the builders that can b
 ```
 imdb-service/
 ├── main.py              # FastAPI app, all endpoints
-├── importer.py          # Dataset download + SQLite import logic
+├── importer.py          # Dataset download + SQLite import logic (uses stdlib sqlite3 for bulk speed)
 ├── charts.py            # Pre-computed chart definitions and in-memory cache
 ├── Dockerfile
 ├── requirements.txt
@@ -52,6 +53,8 @@ imdb-service/
 ## Database Schema
 
 Seven tables, one per IMDB dataset. Built into SQLite at `$DATA_DIR/imdb.db`. During daily refresh, a shadow DB is built at `$TMP_DIR/imdb_shadow.db` then atomically swapped.
+
+`title_akas` has no primary key in the source data; the logical unique key is `(tconst, ordering)`.
 
 ```sql
 -- title.basics.tsv.gz
@@ -77,7 +80,7 @@ CREATE TABLE title_ratings (
     numVotes INTEGER
 );
 
--- title.akas.tsv.gz
+-- title.akas.tsv.gz  (logical unique key: tconst + ordering)
 CREATE TABLE title_akas (
     tconst TEXT NOT NULL,
     ordering INTEGER,
@@ -138,8 +141,11 @@ IMDB's `\N` null sentinel values are converted to SQL `NULL` during import.
 
 ## API Endpoints
 
+### `GET /`
+HTML landing page listing all endpoints. Consistent with existing services.
+
 ### `GET /stats`
-Health check. Returns DB record counts per table, last refresh timestamp, chart cache status, and `"status": "online" | "initializing"`.
+Health check. Returns DB record counts per table, `last_refresh` as ISO 8601 UTC string (e.g. `"2026-03-24T03:00:00Z"`), chart cache status, and `"status": "online" | "initializing"`.
 
 ### `GET /title/{imdb_id}`
 Full title record: joins title_basics + title_ratings + title_crew + episode count (if series) + top principals ordered by `ordering`. Returns JSON.
@@ -148,21 +154,23 @@ Full title record: joins title_basics + title_ratings + title_crew + episode cou
 Full person record from name_basics. Returns JSON.
 
 ### `GET /chart/{chart_name}`
-Returns a pre-computed list of IMDb IDs with basic metadata. Computed on startup and after each daily refresh. Optional `?limit=N` (max 500).
+Returns a pre-computed list of IMDb IDs with basic metadata. Computed on startup and after each daily refresh. Optional `?limit=N` (default and max per chart below).
 
-| chart_name | Logic |
-|---|---|
-| `top_movies` | Top 250 movies by weighted rating (numVotes ≥ MIN_VOTES_CHART) |
-| `top_shows` | Top 250 TV series by weighted rating |
-| `lowest_rated` | Bottom 100 movies with ≥ MIN_VOTES_CHART votes |
-| `top_english` | Top 250 movies with language=en in title_akas |
-| `top_indian` | Top rated movies with region=IN |
-| `top_tamil` | Top rated movies with language=ta |
-| `top_telugu` | Top rated movies with language=te |
-| `top_malayalam` | Top rated movies with language=ml |
+Chart rankings use the Bayesian weighted rating formula: `WR = (v / (v + m)) × R + (m / (v + m)) × C` where `v` = numVotes for the title, `m` = MIN_VOTES_CHART, `R` = title's averageRating, and `C` = mean averageRating across all qualifying titles. This matches IMDB's published methodology.
+
+| chart_name | Logic | Default size | Max via `?limit` |
+|---|---|---|---|
+| `top_movies` | Top movies by weighted rating (numVotes ≥ MIN_VOTES_CHART) | 250 | 500 |
+| `top_shows` | Top TV series by weighted rating (numVotes ≥ MIN_VOTES_CHART) | 250 | 500 |
+| `lowest_rated` | Lowest rated movies by weighted rating (numVotes ≥ MIN_VOTES_CHART) | 250 | 500 |
+| `top_english` | Top movies with language=en in title_akas, by weighted rating | 250 | 500 |
+| `top_indian` | Top movies with region=IN in title_akas, by weighted rating | 250 | 500 |
+| `top_tamil` | Top movies with language=ta in title_akas, by weighted rating | 250 | 500 |
+| `top_telugu` | Top movies with language=te in title_akas, by weighted rating | 250 | 500 |
+| `top_malayalam` | Top movies with language=ml in title_akas, by weighted rating | 250 | 500 |
 
 ### `GET /search`
-Ad-hoc filtered query. Returns `{"results": ["tt...", ...], "total": N}` (IMDb IDs only).
+Ad-hoc filtered query. Returns `{"results": ["tt...", ...], "total": N}` (IMDb IDs only). No offset/pagination.
 
 | Query param | Source column | Notes |
 |---|---|---|
@@ -178,20 +186,22 @@ Ad-hoc filtered query. Returns `{"results": ["tt...", ...], "total": N}` (IMDb I
 | `cast` / `cast.any` / `cast.not` | title_principals.nconst | nm IDs |
 | `series` / `series.not` | title_episode.parentTconst | tt IDs |
 | `adult` | title_basics.isAdult | boolean |
-| `imdb_top` | rank in top_movies chart | integer |
-| `imdb_bottom` | rank in lowest_rated chart | integer |
+| `imdb_top` | rank ≤ N in pre-computed top_movies chart | integer; mutually exclusive with `imdb_bottom` |
+| `imdb_bottom` | rank ≤ N in pre-computed lowest_rated chart | integer; mutually exclusive with `imdb_top` |
 | `sort_by` | rating/votes/year/title + .asc/.desc | default: `rating.desc` |
 | `limit` | — | default 100, max 1000 |
+
+`imdb_top=250` means "return only titles whose rank in the top_movies chart is ≤ 250" (i.e., they appear in the top 250). `imdb_bottom=100` means the same for the lowest_rated chart. The two params are mutually exclusive; passing both returns a 400 error.
 
 ---
 
 ## Daily Refresh Pipeline
 
 1. **Download** — fetch all 7 `.tsv.gz` files from `https://datasets.imdbws.com/` concurrently with `httpx` streaming. Saved to `$TMP_DIR`.
-2. **Import into shadow DB** — parse each file, insert in batches of 10,000 rows. `\N` → `NULL`. Progress logged per-file.
-3. **Build indexes** — run all `CREATE INDEX` statements on the shadow DB after bulk insert.
-4. **Atomic swap** — `os.replace(shadow_db_path, live_db_path)`. In-flight queries finish against old file handle.
-5. **Rebuild chart cache** — recompute all pre-computed charts into the in-memory dict from the new live DB.
+2. **Import into shadow DB** — parse each `.tsv.gz` using the stdlib `sqlite3` module (not `aiosqlite`) for bulk-insert performance, in batches of 10,000 rows. Each file is imported inside its own transaction; a corrupt or truncated file raises an exception that aborts that file's transaction and rolls back all rows for that table. `\N` → `NULL`. A minimum row-count threshold per file is validated before committing (e.g. title_basics must have ≥ 1,000,000 rows). Progress logged per-file.
+3. **Build indexes** — run all `CREATE INDEX` statements on the shadow DB after all tables are fully populated.
+4. **Atomic swap** — `os.replace(shadow_db_path, live_db_path)`. `DATA_DIR` and `TMP_DIR` **must resolve to the same filesystem** (both are subdirectories of the same Docker volume mount by default). If they are on different filesystems, `os.replace()` raises `OSError: [Errno 18] Invalid cross-device link`; the importer catches this, logs a clear error, and leaves the live DB untouched. The docker-compose config avoids this by default: both `imdb-data` and `imdb-tmp` volumes are mounted under `/app/` on the same container filesystem.
+5. **Rebuild chart cache** — build all pre-computed charts into a new local dict, then replace the module-level `chart_cache` dict in a single atomic assignment (`chart_cache = new_dict`) to prevent partial reads during rebuild.
 6. **Cleanup** — delete downloaded `.tsv.gz` files and temp files.
 
 **Failure handling:** any step failure deletes the shadow DB and leaves the live DB untouched. Service continues serving stale data. Full traceback logged.
@@ -201,6 +211,27 @@ Ad-hoc filtered query. Returns `{"results": ["tt...", ...], "total": N}` (IMDb I
 **First-run:** if no live DB exists, all data endpoints return `503` with `"status": "initializing"` until the initial import completes. `/stats` always responds.
 
 **Disk:** peak usage is ~2× DB size (live + shadow). Recommend 20 GB volume.
+
+---
+
+## Python Dependencies
+
+**`requirements.txt`** (runtime):
+```
+fastapi
+uvicorn[standard]
+httpx
+aiosqlite        # used for async read queries in endpoints
+```
+
+**`requirements-dev.txt`** (testing):
+```
+pytest
+pytest-asyncio
+httpx            # for TestClient
+```
+
+`importer.py` uses the stdlib `sqlite3` module (not `aiosqlite`) for bulk import — it runs in a background thread via `asyncio.to_thread()` and stdlib `sqlite3` is significantly faster for batch inserts than the async wrapper.
 
 ---
 
@@ -220,11 +251,10 @@ imdb-service:
     - ROOT_PATH=/imdb-service
     - REFRESH_HOUR=3
     - DATA_DIR=/app/data
-    - TMP_DIR=/app/tmp
+    - TMP_DIR=/app/data
     - MIN_VOTES_CHART=25000
   volumes:
     - imdb-data:/app/data
-    - imdb-tmp:/app/tmp
   deploy:
     resources:
       limits:
@@ -234,8 +264,9 @@ imdb-service:
 
 volumes:
   imdb-data:
-  imdb-tmp:
 ```
+
+Note: both `DATA_DIR` and `TMP_DIR` must resolve to the same filesystem for `os.replace()` to work atomically. The simplest approach is to use **a single volume** (`imdb-data`) and place the shadow DB inside it as `$DATA_DIR/imdb_shadow.db` (i.e. `TMP_DIR` defaults to `DATA_DIR`). The importer catches `OSError: [Errno 18] Invalid cross-device link` and logs a clear error if misconfigured.
 
 ### Caddyfile
 Add a new route block routing `/imdb-service/*` → `reverse_proxy imdb-service:8000`.
@@ -246,7 +277,7 @@ Add a new route block routing `/imdb-service/*` → `reverse_proxy imdb-service:
 |---|---|---|
 | `ROOT_PATH` | `""` | Path prefix for reverse proxy |
 | `DATA_DIR` | `/app/data` | Directory for live SQLite DB |
-| `TMP_DIR` | `/app/tmp` | Directory for shadow DB during refresh |
+| `TMP_DIR` | `/app/data` | Directory for shadow DB during refresh (must be same filesystem as DATA_DIR) |
 | `REFRESH_HOUR` | `3` | UTC hour for daily refresh (0–23) |
 | `MIN_VOTES_CHART` | `25000` | Min vote threshold for chart ranking |
 
@@ -258,3 +289,4 @@ Add a new route block routing `/imdb-service/*` → `reverse_proxy imdb-service:
 - Popularity, box office, company, keyword, content rating, interest, award event, topic filters (not in public datasets)
 - Full-text search on plot/trivia/quotes (not in datasets)
 - Authentication / per-user data
+- Offset/cursor pagination on `/search`
