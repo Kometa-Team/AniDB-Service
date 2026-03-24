@@ -546,6 +546,8 @@ def test_get_title_returns_full_record(tmp_path, monkeypatch):
     assert data["numVotes"] == 2800000
     assert data["directors"] == "nm0001104"
     assert len(data["principals"]) == 2
+    assert data["principals"][0]["ordering"] == 1
+    assert data["principals"][1]["ordering"] == 2
 
 
 def test_get_title_includes_episode_count_for_series(tmp_path, monkeypatch):
@@ -559,6 +561,18 @@ def test_get_title_includes_episode_count_for_series(tmp_path, monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["episode_count"] == 1
+
+
+def test_get_title_movie_has_no_episode_count(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/title/tt0111161")  # movie, not a series
+    assert response.status_code == 200
+    assert "episode_count" not in response.json()
 
 
 def test_get_title_returns_404_for_unknown(tmp_path, monkeypatch):
