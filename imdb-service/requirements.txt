@@ -1,0 +1,4 @@
+aiosqlite
+fastapi
+httpx
+uvicorn[standard]
