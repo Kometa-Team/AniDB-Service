@@ -12,6 +12,8 @@ This repository publishes Docker images for its locally maintained utility servi
 - `ghcr.io/kometa-team/plex-oauth`
 - `ghcr.io/kometa-team/trakt-oauth`
 - `ghcr.io/kometa-team/mal-oauth`
+- `ghcr.io/kometa-team/simkl-oauth`
+- `ghcr.io/kometa-team/simkl-service`
 
 The base `docker-compose.yml` uses those published GHCR images.
 
