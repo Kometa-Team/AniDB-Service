@@ -153,7 +153,7 @@ async def root(request: Request) -> HTMLResponse:
 async def get_stats() -> Dict[str, Any]:
     """Return service health: status, last refresh time, and per-table row counts."""
     if not _db_is_ready():
-        return {"status": "initializing", "last_refresh": None, "table_counts": {}}
+        return {"status": "initializing"}
 
     try:
         async with aiosqlite.connect(DB_PATH) as db:

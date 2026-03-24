@@ -476,7 +476,17 @@ def test_stats_returns_online_with_db(tmp_path, monkeypatch):
     data = response.json()
     assert data["status"] == "online"
     assert "last_refresh" in data
-    assert "title_basics" in data["table_counts"]
+    for table in (
+        "title_basics",
+        "title_ratings",
+        "title_akas",
+        "title_crew",
+        "title_episode",
+        "title_principals",
+        "name_basics",
+    ):
+        assert table in data["table_counts"], f"Missing table count: {table}"
+    assert "charts_cached" in data
 
 
 def test_root_returns_html(tmp_path, monkeypatch):
