@@ -2,13 +2,22 @@
 
 import sqlite3
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 # Module-level chart cache. Replaced atomically by rebuild_all_charts().
 chart_cache: dict[str, list[dict[str, Any]]] = {}
 
+
+class ChartConfig(TypedDict):
+    """Configuration for a single chart."""
+
+    title_type: str
+    aka_filter: tuple[str, str] | None
+    ascending: bool
+
+
 # Chart configs: name → {title_type, aka_filter (col, val) or None, ascending}
-CHART_CONFIGS: dict[str, dict] = {
+CHART_CONFIGS: dict[str, ChartConfig] = {
     "top_movies": {"title_type": "movie", "aka_filter": None, "ascending": False},
     "top_shows": {"title_type": "tvSeries", "aka_filter": None, "ascending": False},
     "lowest_rated": {"title_type": "movie", "aka_filter": None, "ascending": True},
@@ -16,7 +25,11 @@ CHART_CONFIGS: dict[str, dict] = {
     "top_indian": {"title_type": "movie", "aka_filter": ("region", "IN"), "ascending": False},
     "top_tamil": {"title_type": "movie", "aka_filter": ("language", "ta"), "ascending": False},
     "top_telugu": {"title_type": "movie", "aka_filter": ("language", "te"), "ascending": False},
-    "top_malayalam": {"title_type": "movie", "aka_filter": ("language", "ml"), "ascending": False},
+    "top_malayalam": {
+        "title_type": "movie",
+        "aka_filter": ("language", "ml"),
+        "ascending": False,
+    },
 }
 
 DEFAULT_CHART_SIZE = 250
@@ -25,7 +38,7 @@ MAX_CHART_SIZE = 500
 
 def _compute_chart(
     conn: sqlite3.Connection,
-    config: dict,
+    config: ChartConfig,
     min_votes: int,
     limit: int = DEFAULT_CHART_SIZE,
 ) -> list[dict[str, Any]]:
@@ -47,7 +60,7 @@ def _compute_chart(
                   WHERE ta.tconst = tb.tconst AND ta.{aka_col} = ?
               )
         """  # nosec B608 — aka_col is from internal CHART_CONFIGS dict, not user input
-        params: tuple = (title_type, min_votes, aka_val)
+        params: tuple[str, int, str] | tuple[str, int] = (title_type, min_votes, aka_val)
     else:
         sql = """
             SELECT tb.tconst, tb.primaryTitle, tb.startYear, tr.averageRating, tr.numVotes

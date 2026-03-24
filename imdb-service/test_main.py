@@ -287,23 +287,39 @@ def test_run_full_import_leaves_live_db_on_failure(tmp_path):
 
 
 def _seed_db_for_charts(db_path):
-    """Seed a test DB with data for chart tests."""
+    """Seed a test DB with data for chart tests.
+
+    Movies are chosen so that Bayesian weighted-rating (wr) order diverges from
+    raw averageRating order, which lets the sort tests verify wr behaviour:
+
+      Alpha:  rating=9.0, votes=25001  (barely above threshold → pulled toward mean)
+      Beta:   rating=8.0, votes=1000000 (huge vote count → wr ≈ raw rating)
+      Gamma:  rating=2.0, votes=100000
+
+    With min_votes=25000 all three qualify.  C (mean) = (9+8+2)/3 ≈ 6.33.
+      wr(Alpha) ≈ 7.67  ← penalised despite highest raw rating
+      wr(Beta)  ≈ 7.96  ← boosted despite lower raw rating
+      wr(Gamma) ≈ 2.87
+
+    Descending wr order:  Beta > Alpha > Gamma  (raw rating order: Alpha > Beta > Gamma)
+    Ascending  wr order:  Gamma < Alpha < Beta   (raw rating order: Gamma < Beta < Alpha)
+    """
     conn = sqlite3.connect(db_path)
     from importer import create_schema
 
     create_schema(conn)
-    movies = [
+    titles = [
         ("tt0000001", "movie", "Alpha", "Alpha", 0, 2000, None, 120, "Action"),
         ("tt0000002", "movie", "Beta", "Beta", 0, 2001, None, 90, "Drama"),
         ("tt0000003", "movie", "Gamma", "Gamma", 0, 2002, None, 100, "Comedy"),
         ("tt0000004", "tvSeries", "Delta", "Delta", 0, 2003, 2005, None, "Drama"),
         ("tt0000005", "tvSeries", "Epsilon", "Epsilon", 0, 2004, None, None, "Action"),
     ]
-    conn.executemany("INSERT INTO title_basics VALUES (?,?,?,?,?,?,?,?,?)", movies)
+    conn.executemany("INSERT INTO title_basics VALUES (?,?,?,?,?,?,?,?,?)", titles)
     ratings = [
-        ("tt0000001", 8.5, 30000),
-        ("tt0000002", 7.0, 40000),
-        ("tt0000003", 6.5, 35000),
+        ("tt0000001", 9.0, 25001),  # Alpha: high raw rating, barely-qualifying votes
+        ("tt0000002", 8.0, 1000000),  # Beta:  lower raw rating, massive vote count
+        ("tt0000003", 2.0, 100000),  # Gamma: low rating, moderate votes
         ("tt0000004", 9.0, 50000),
         ("tt0000005", 8.0, 60000),
     ]
@@ -315,11 +331,17 @@ def _seed_db_for_charts(db_path):
     conn.close()
 
 
+def _compute_wr(rating: float, votes: int, mean_rating: float, min_votes: int) -> float:
+    """Replicate the Bayesian weighted-rating formula used by charts._compute_chart."""
+    return (votes / (votes + min_votes)) * rating + (min_votes / (votes + min_votes)) * mean_rating
+
+
 def test_rebuild_all_charts_populates_cache(tmp_path):
     db_path = tmp_path / "imdb.db"
     _seed_db_for_charts(db_path)
     import charts
 
+    charts.chart_cache = {}
     charts.rebuild_all_charts(db_path, min_votes=25000)
     assert "top_movies" in charts.chart_cache
     assert "top_shows" in charts.chart_cache
@@ -328,25 +350,60 @@ def test_rebuild_all_charts_populates_cache(tmp_path):
 
 
 def test_top_movies_chart_sorted_by_weighted_rating(tmp_path):
+    """Chart must be ordered by Bayesian wr, not raw averageRating.
+
+    Seed data is deliberately chosen so that wr order diverges from raw-rating
+    order: Beta (8.0, 1 000 000 votes) outscores Alpha (9.0, 25 001 votes)
+    because Alpha's rating is heavily pulled toward the mean.
+    """
     db_path = tmp_path / "imdb.db"
     _seed_db_for_charts(db_path)
     import charts
 
-    charts.rebuild_all_charts(db_path, min_votes=25000)
+    charts.chart_cache = {}
+    min_votes = 25000
+    charts.rebuild_all_charts(db_path, min_votes=min_votes)
     top = charts.chart_cache["top_movies"]
-    ratings = [item["averageRating"] for item in top]
-    assert ratings == sorted(ratings, reverse=True)
+
+    # Compute expected wr scores for the qualifying movies.
+    # mean_rating = (9.0 + 8.0 + 2.0) / 3
+    mean_rating = (9.0 + 8.0 + 2.0) / 3
+    wr_scores = [
+        _compute_wr(item["averageRating"], item["numVotes"], mean_rating, min_votes) for item in top
+    ]
+    # Chart must be in descending wr order.
+    assert wr_scores == sorted(wr_scores, reverse=True)
+    # Sanity: Beta (8.0, 1 000 000) should rank above Alpha (9.0, 25 001).
+    titles = [item["primaryTitle"] for item in top]
+    assert titles.index("Beta") < titles.index("Alpha")
 
 
 def test_lowest_rated_chart_is_ascending(tmp_path):
+    """lowest_rated chart must be ordered by ascending Bayesian wr.
+
+    With the seed data the ascending wr order is Gamma < Alpha < Beta, which
+    differs from the raw-rating ascending order (Gamma < Beta < Alpha).
+    """
     db_path = tmp_path / "imdb.db"
     _seed_db_for_charts(db_path)
     import charts
 
-    charts.rebuild_all_charts(db_path, min_votes=25000)
+    charts.chart_cache = {}
+    min_votes = 25000
+    charts.rebuild_all_charts(db_path, min_votes=min_votes)
     bottom = charts.chart_cache["lowest_rated"]
-    ratings = [item["averageRating"] for item in bottom]
-    assert ratings == sorted(ratings)
+
+    # Compute expected wr scores and verify ascending order.
+    mean_rating = (9.0 + 8.0 + 2.0) / 3
+    wr_scores = [
+        _compute_wr(item["averageRating"], item["numVotes"], mean_rating, min_votes)
+        for item in bottom
+    ]
+    assert wr_scores == sorted(wr_scores)
+    # Sanity: Alpha (9.0, 25 001) should rank below Beta (8.0, 1 000 000) in
+    # ascending order because Alpha is penalised by its low vote count.
+    titles = [item["primaryTitle"] for item in bottom]
+    assert titles.index("Alpha") < titles.index("Beta")
 
 
 def test_top_english_only_includes_english_titles(tmp_path):
@@ -354,6 +411,7 @@ def test_top_english_only_includes_english_titles(tmp_path):
     _seed_db_for_charts(db_path)
     import charts
 
+    charts.chart_cache = {}
     charts.rebuild_all_charts(db_path, min_votes=25000)
     english = charts.chart_cache["top_english"]
     tconsts = {item["tconst"] for item in english}
@@ -367,6 +425,7 @@ def test_chart_items_have_required_fields(tmp_path):
     _seed_db_for_charts(db_path)
     import charts
 
+    charts.chart_cache = {}
     charts.rebuild_all_charts(db_path, min_votes=25000)
     item = charts.chart_cache["top_movies"][0]
     for field in ("tconst", "primaryTitle", "startYear", "averageRating", "numVotes", "rank"):
