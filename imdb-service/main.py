@@ -195,14 +195,6 @@ async def search(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    allowed_tconsts: Optional[set] = None
-    if imdb_top is not None:
-        top_chart = charts.chart_cache.get("top_movies", [])
-        allowed_tconsts = {item["tconst"] for item in top_chart if item["rank"] <= imdb_top}
-    elif imdb_bottom is not None:
-        bottom_chart = charts.chart_cache.get("lowest_rated", [])
-        allowed_tconsts = {item["tconst"] for item in bottom_chart if item["rank"] <= imdb_bottom}
-
     conditions: list[str] = []
     params: list = []
 
@@ -266,7 +258,10 @@ async def search(
     def _year_from(s: str) -> int:
         if s.lower() == "today":
             return date.today().year
-        return int(s[:4])
+        try:
+            return int(s[:4])
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid year value: {s!r}")
 
     if release_after:
         conditions.append("tb.startYear > ?")
@@ -279,9 +274,24 @@ async def search(
         conditions.append("tb.primaryTitle LIKE ?")
         params.append(f"%{title}%")
 
-    joins: list[str] = []
+    if imdb_top is not None:
+        top_chart = charts.chart_cache.get("top_movies", [])
+        allowed = [item["tconst"] for item in top_chart if item["rank"] <= imdb_top]
+        if not allowed:
+            return {"results": [], "total": 0}
+        placeholders = ",".join("?" * len(allowed))
+        conditions.append(f"tb.tconst IN ({placeholders})")  # nosec B608
+        params.extend(allowed)
+    elif imdb_bottom is not None:
+        bottom_chart = charts.chart_cache.get("lowest_rated", [])
+        allowed = [item["tconst"] for item in bottom_chart if item["rank"] <= imdb_bottom]
+        if not allowed:
+            return {"results": [], "total": 0}
+        placeholders = ",".join("?" * len(allowed))
+        conditions.append(f"tb.tconst IN ({placeholders})")  # nosec B608
+        params.extend(allowed)
+
     _add_join_filters(
-        joins,
         conditions,
         params,
         language,
@@ -300,17 +310,15 @@ async def search(
     )
 
     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
-    join_clause = " ".join(joins)
 
-    sql = f"""
-        SELECT DISTINCT tb.tconst
-        FROM title_basics tb
-        LEFT JOIN title_ratings tr ON tb.tconst = tr.tconst
-        {join_clause}
-        {where_clause}
-        ORDER BY {sort_col} {sort_dir}
-        LIMIT ?
-    """  # nosec B608 — sort_col/sort_dir validated against SORT_COLUMN_MAP
+    sql = (
+        f"SELECT DISTINCT tb.tconst "  # nosec B608 — sort_col/sort_dir validated against SORT_COLUMN_MAP
+        f"FROM title_basics tb "
+        f"LEFT JOIN title_ratings tr ON tb.tconst = tr.tconst "
+        f"{where_clause} "
+        f"ORDER BY {sort_col} {sort_dir} "
+        f"LIMIT ?"
+    )
 
     params.append(limit)
 
@@ -323,16 +331,12 @@ async def search(
 
     results = [row[0] for row in rows]
 
-    if allowed_tconsts is not None:
-        results = [t for t in results if t in allowed_tconsts]
-
     return {"results": results, "total": len(results)}
 
 
 def _add_join_filters(
-    joins: list,
-    conditions: list,
-    params: list,
+    conditions: list[str],
+    params: list[Any],
     language: Optional[str],
     language_any: Optional[str],
     language_not: Optional[str],
@@ -347,8 +351,81 @@ def _add_join_filters(
     series: Optional[str],
     series_not: Optional[str],
 ) -> None:
-    """Append WHERE conditions for join-based filters. Implemented in Task 12."""
-    pass  # placeholder — filled in Task 12
+    """Append WHERE conditions for join-based filters using EXISTS subqueries."""
+
+    def _exists_aka(col: str, negate: bool = False) -> str:
+        op = "NOT EXISTS" if negate else "EXISTS"
+        return f"{op} (SELECT 1 FROM title_akas ta WHERE ta.tconst = tb.tconst AND ta.{col} = ?)"  # nosec B608
+
+    def _exists_aka_original(col: str) -> str:
+        return f"EXISTS (SELECT 1 FROM title_akas ta WHERE ta.tconst = tb.tconst AND ta.{col} = ? AND ta.isOriginalTitle = 1)"  # nosec B608
+
+    if language:
+        for lang in language.split(","):
+            conditions.append(_exists_aka("language"))
+            params.append(lang.strip())
+    if language_any:
+        langs = [lang.strip() for lang in language_any.split(",")]
+        sub = " OR ".join(_exists_aka("language") for _ in langs)
+        conditions.append(f"({sub})")
+        params.extend(langs)
+    if language_not:
+        for lang in language_not.split(","):
+            conditions.append(_exists_aka("language", negate=True))
+            params.append(lang.strip())
+    if language_primary:
+        for lang in language_primary.split(","):
+            conditions.append(_exists_aka_original("language"))
+            params.append(lang.strip())
+
+    if country:
+        for c in country.split(","):
+            conditions.append(_exists_aka("region"))
+            params.append(c.strip())
+    if country_any:
+        cs = [c.strip() for c in country_any.split(",")]
+        sub = " OR ".join(_exists_aka("region") for _ in cs)
+        conditions.append(f"({sub})")
+        params.extend(cs)
+    if country_not:
+        for c in country_not.split(","):
+            conditions.append(_exists_aka("region", negate=True))
+            params.append(c.strip())
+    if country_origin:
+        for c in country_origin.split(","):
+            conditions.append(_exists_aka_original("region"))
+            params.append(c.strip())
+
+    def _exists_cast(negate: bool = False) -> str:
+        op = "NOT EXISTS" if negate else "EXISTS"
+        return f"{op} (SELECT 1 FROM title_principals tp WHERE tp.tconst = tb.tconst AND tp.nconst = ?)"  # nosec B608
+
+    if cast:
+        for nm in cast.split(","):
+            conditions.append(_exists_cast())
+            params.append(nm.strip())
+    if cast_any:
+        nms = [nm.strip() for nm in cast_any.split(",")]
+        sub = " OR ".join(_exists_cast() for _ in nms)
+        conditions.append(f"({sub})")
+        params.extend(nms)
+    if cast_not:
+        for nm in cast_not.split(","):
+            conditions.append(_exists_cast(negate=True))
+            params.append(nm.strip())
+
+    if series:
+        for s in series.split(","):
+            conditions.append(
+                "EXISTS (SELECT 1 FROM title_episode te WHERE te.tconst = tb.tconst AND te.parentTconst = ?)"
+            )
+            params.append(s.strip())
+    if series_not:
+        for s in series_not.split(","):
+            conditions.append(
+                "NOT EXISTS (SELECT 1 FROM title_episode te WHERE te.tconst = tb.tconst AND te.parentTconst = ?)"
+            )
+            params.append(s.strip())
 
 
 @app.get("/", response_class=HTMLResponse)

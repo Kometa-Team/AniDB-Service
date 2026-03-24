@@ -864,3 +864,230 @@ def test_search_rejects_imdb_top_and_bottom_together(tmp_path, monkeypatch):
     client = TestClient(main.app)
     response = client.get("/search?imdb_top=100&imdb_bottom=50")
     assert response.status_code == 400
+
+
+def _seed_join_search_db(db_path):
+    """Seed DB with data for join-filter search tests."""
+    conn = sqlite3.connect(db_path)
+    from importer import create_schema
+
+    create_schema(conn)
+    titles = [
+        ("tt0000001", "movie", "English Film", "English Film", 0, 2000, None, 120, "Drama"),
+        ("tt0000002", "movie", "French Film", "French Film", 0, 2001, None, 100, "Drama"),
+        ("tt0000003", "movie", "Hindi Film", "Hindi Film", 0, 2002, None, 90, "Drama"),
+        ("tt0000004", "tvEpisode", "Episode 1", "Episode 1", 0, 2010, None, 45, "Drama"),
+    ]
+    conn.executemany("INSERT INTO title_basics VALUES (?,?,?,?,?,?,?,?,?)", titles)
+    conn.executemany(
+        "INSERT INTO title_ratings VALUES (?,?,?)",
+        [
+            ("tt0000001", 8.0, 50000),
+            ("tt0000002", 7.5, 40000),
+            ("tt0000003", 7.0, 30000),
+            ("tt0000004", 8.5, 10000),
+        ],
+    )
+    conn.execute(
+        "INSERT INTO title_akas VALUES ('tt0000001',1,'English Film','US','en',NULL,NULL,1)"
+    )
+    conn.execute(
+        "INSERT INTO title_akas VALUES ('tt0000002',1,'French Film','FR','fr',NULL,NULL,1)"
+    )
+    conn.execute("INSERT INTO title_akas VALUES ('tt0000003',1,'Hindi Film','IN','hi',NULL,NULL,1)")
+    conn.execute(
+        "INSERT INTO title_principals VALUES ('tt0000001',1,'nm0000001','actor',NULL,'[\"Hero\"]')"
+    )
+    conn.execute(
+        "INSERT INTO title_principals VALUES ('tt0000002',1,'nm0000002','actor',NULL,'[\"Villain\"]')"
+    )
+    conn.execute("INSERT INTO title_episode VALUES ('tt0000004','tt0000099',1,1)")
+    conn.commit()
+    conn.close()
+
+
+def test_search_filter_by_language(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_join_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?language=en")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tt0000001" in data["results"]
+    assert "tt0000002" not in data["results"]
+
+
+def test_search_filter_language_not(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_join_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?language.not=fr&type=movie")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tt0000002" not in data["results"]
+    assert "tt0000001" in data["results"]
+
+
+def test_search_filter_by_cast(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_join_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?cast=nm0000001")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tt0000001" in data["results"]
+    assert "tt0000002" not in data["results"]
+
+
+def test_search_filter_by_series(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_join_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?series=tt0000099")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tt0000004" in data["results"]
+    assert "tt0000001" not in data["results"]
+
+
+def test_search_filter_type_not(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?type.not=tvSeries")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tt0000003" not in data["results"]  # tvSeries excluded
+    assert "tt0000001" in data["results"]
+
+
+def test_search_filter_genre_all_must_match(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    # tt0000001 has Action,Thriller — genre=Action should match
+    response = client.get("/search?genre=Action")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tt0000001" in data["results"]
+    assert "tt0000002" not in data["results"]  # Comedy only
+
+
+def test_search_filter_votes_gte(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?votes.gte=100000")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tt0000001" in data["results"]  # 100000 votes
+    assert "tt0000002" not in data["results"]  # 50000 votes
+
+
+def test_search_filter_runtime(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?runtime.gte=100")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tt0000001" in data["results"]  # 120 min
+    assert "tt0000002" not in data["results"]  # 90 min
+
+
+def test_search_filter_title(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?title=Action")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tt0000001" in data["results"]
+    assert "tt0000002" not in data["results"]
+
+
+def test_search_invalid_sort_by_returns_400(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?sort_by=popularity.desc")
+    assert response.status_code == 400
+
+
+def test_search_invalid_year_returns_400(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?release.after=not-a-year")
+    assert response.status_code == 400
+
+
+def test_search_returns_503_when_no_db(tmp_path, monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "nonexistent.db")
+    client = TestClient(main.app, raise_server_exceptions=False)
+    response = client.get("/search")
+    assert response.status_code == 503
+
+
+def test_search_imdb_top_filters_to_chart(tmp_path, monkeypatch):
+    import charts
+
+    import main
+
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    # Only tt0000001 is rank 1 in chart
+    charts.chart_cache = {
+        "top_movies": [
+            {
+                "tconst": "tt0000001",
+                "rank": 1,
+                "primaryTitle": "Action Film",
+                "startYear": 2000,
+                "averageRating": 8.5,
+                "numVotes": 100000,
+            },
+        ]
+    }
+    client = TestClient(main.app)
+    response = client.get("/search?imdb_top=1")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tt0000001" in data["results"]
+    assert "tt0000002" not in data["results"]
