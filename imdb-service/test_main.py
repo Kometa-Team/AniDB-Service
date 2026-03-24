@@ -499,3 +499,118 @@ def test_root_returns_html(tmp_path, monkeypatch):
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
     assert "IMDB" in response.text
+
+
+def _seed_full_test_db(db_path):
+    """Seed a test DB with a complete set of test data for endpoint tests."""
+    conn = sqlite3.connect(db_path)
+    from importer import create_schema
+
+    create_schema(conn)
+    conn.execute(
+        "INSERT INTO title_basics VALUES ('tt0111161','movie','The Shawshank Redemption','The Shawshank Redemption',0,1994,NULL,142,'Drama')"
+    )
+    conn.execute(
+        "INSERT INTO title_basics VALUES ('tt0096697','tvSeries','The Simpsons','The Simpsons',0,1989,NULL,22,'Animation,Comedy')"
+    )
+    conn.execute("INSERT INTO title_ratings VALUES ('tt0111161', 9.3, 2800000)")
+    conn.execute("INSERT INTO title_ratings VALUES ('tt0096697', 8.0, 500000)")
+    conn.execute("INSERT INTO title_crew VALUES ('tt0111161','nm0001104',NULL)")
+    conn.execute(
+        "INSERT INTO title_principals VALUES ('tt0111161',1,'nm0000209','actor',NULL,'[\"Andy Dufresne\"]')"
+    )
+    conn.execute(
+        "INSERT INTO title_principals VALUES ('tt0111161',2,'nm0000151','actor',NULL,'[\"Ellis Boyd Redding\"]')"
+    )
+    conn.execute("INSERT INTO title_episode VALUES ('tt0502973','tt0096697',1,1)")
+    conn.execute(
+        "INSERT INTO name_basics VALUES ('nm0001104','Frank Darabont',1959,NULL,'director,writer,producer','tt0111161')"
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_get_title_returns_full_record(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/title/tt0111161")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["tconst"] == "tt0111161"
+    assert data["primaryTitle"] == "The Shawshank Redemption"
+    assert data["averageRating"] == 9.3
+    assert data["numVotes"] == 2800000
+    assert data["directors"] == "nm0001104"
+    assert len(data["principals"]) == 2
+
+
+def test_get_title_includes_episode_count_for_series(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/title/tt0096697")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["episode_count"] == 1
+
+
+def test_get_title_returns_404_for_unknown(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/title/tt9999999")
+    assert response.status_code == 404
+
+
+def test_get_title_returns_503_when_no_db(tmp_path, monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "nonexistent.db")
+    client = TestClient(main.app, raise_server_exceptions=False)
+    response = client.get("/title/tt0111161")
+    assert response.status_code == 503
+
+
+def test_get_person_returns_record(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/person/nm0001104")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["nconst"] == "nm0001104"
+    assert data["primaryName"] == "Frank Darabont"
+    assert data["birthYear"] == 1959
+
+
+def test_get_person_returns_404_for_unknown(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/person/nm9999999")
+    assert response.status_code == 404
+
+
+def test_get_person_returns_503_when_no_db(tmp_path, monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "nonexistent.db")
+    client = TestClient(main.app, raise_server_exceptions=False)
+    response = client.get("/person/nm0001104")
+    assert response.status_code == 503

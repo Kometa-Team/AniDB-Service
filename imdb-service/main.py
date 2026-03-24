@@ -181,3 +181,69 @@ async def get_stats() -> Dict[str, Any]:
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/title/{imdb_id}")
+async def get_title(imdb_id: str) -> Dict[str, Any]:
+    """Return full title record by IMDb ID (e.g. tt0111161)."""
+    if not _db_is_ready():
+        raise HTTPException(status_code=503, detail="Service initializing")
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+
+        cursor = await db.execute(
+            """
+            SELECT tb.*, tr.averageRating, tr.numVotes
+            FROM title_basics tb
+            LEFT JOIN title_ratings tr ON tb.tconst = tr.tconst
+            WHERE tb.tconst = ?
+            """,
+            (imdb_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Title {imdb_id!r} not found")
+
+        result = dict(row)
+
+        cursor = await db.execute(
+            "SELECT directors, writers FROM title_crew WHERE tconst = ?", (imdb_id,)
+        )
+        crew = await cursor.fetchone()
+        result["directors"] = crew["directors"] if crew else None
+        result["writers"] = crew["writers"] if crew else None
+
+        cursor = await db.execute(
+            """
+            SELECT nconst, ordering, category, job, characters
+            FROM title_principals WHERE tconst = ? ORDER BY ordering
+            """,
+            (imdb_id,),
+        )
+        principals = await cursor.fetchall()
+        result["principals"] = [dict(p) for p in principals]
+
+        if result.get("titleType") in ("tvSeries", "tvMiniSeries"):
+            cursor = await db.execute(
+                "SELECT COUNT(*) FROM title_episode WHERE parentTconst = ?", (imdb_id,)
+            )
+            ep_row = await cursor.fetchone()
+            result["episode_count"] = ep_row[0] if ep_row else 0
+
+    return result
+
+
+@app.get("/person/{imdb_id}")
+async def get_person(imdb_id: str) -> Dict[str, Any]:
+    """Return person record by IMDb person ID (e.g. nm0000093)."""
+    if not _db_is_ready():
+        raise HTTPException(status_code=503, detail="Service initializing")
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM name_basics WHERE nconst = ?", (imdb_id,))
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Person {imdb_id!r} not found")
+        return dict(row)
