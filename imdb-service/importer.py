@@ -180,7 +180,6 @@ def import_table(
                 count += len(batch)
 
         if count < min_rows:
-            conn.execute("ROLLBACK")
             raise ValueError(
                 f"import_table({table}): too few rows — got {count}, expected ≥ {min_rows}"
             )
