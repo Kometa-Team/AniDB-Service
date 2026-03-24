@@ -3,13 +3,13 @@
 import asyncio
 import os
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import aiosqlite
 import charts
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
 # --- Config ---
@@ -124,6 +124,231 @@ app = FastAPI(
 
 def _db_is_ready() -> bool:
     return DB_PATH.exists()
+
+
+SORT_COLUMN_MAP: Dict[str, str] = {
+    "rating": "tr.averageRating",
+    "votes": "tr.numVotes",
+    "year": "tb.startYear",
+    "title": "tb.primaryTitle",
+}
+
+
+def _parse_sort(sort_by: str) -> tuple[str, str]:
+    """Parse 'rating.desc' → ('tr.averageRating', 'DESC'). Raises ValueError on invalid input."""
+    parts = sort_by.rsplit(".", 1)
+    col_key = parts[0]
+    direction = parts[1].upper() if len(parts) == 2 else "DESC"
+    if col_key not in SORT_COLUMN_MAP:
+        raise ValueError(f"Invalid sort column: {col_key!r}")
+    if direction not in ("ASC", "DESC"):
+        raise ValueError(f"Invalid sort direction: {direction!r}")
+    return SORT_COLUMN_MAP[col_key], direction
+
+
+@app.get("/search")
+async def search(
+    type: Optional[str] = Query(None, alias="type"),  # noqa: B008
+    type_not: Optional[str] = Query(None, alias="type.not"),  # noqa: B008
+    genre: Optional[str] = Query(None, alias="genre"),  # noqa: B008
+    genre_any: Optional[str] = Query(None, alias="genre.any"),  # noqa: B008
+    genre_not: Optional[str] = Query(None, alias="genre.not"),  # noqa: B008
+    rating_gte: Optional[float] = Query(None, alias="rating.gte"),  # noqa: B008
+    rating_lte: Optional[float] = Query(None, alias="rating.lte"),  # noqa: B008
+    votes_gte: Optional[int] = Query(None, alias="votes.gte"),  # noqa: B008
+    votes_lte: Optional[int] = Query(None, alias="votes.lte"),  # noqa: B008
+    runtime_gte: Optional[int] = Query(None, alias="runtime.gte"),  # noqa: B008
+    runtime_lte: Optional[int] = Query(None, alias="runtime.lte"),  # noqa: B008
+    release_after: Optional[str] = Query(None, alias="release.after"),  # noqa: B008
+    release_before: Optional[str] = Query(None, alias="release.before"),  # noqa: B008
+    title: Optional[str] = None,
+    adult: bool = False,
+    imdb_top: Optional[int] = None,
+    imdb_bottom: Optional[int] = None,
+    sort_by: str = "rating.desc",
+    limit: int = Query(default=100, le=1000),  # noqa: B008
+    language: Optional[str] = Query(None, alias="language"),  # noqa: B008
+    language_any: Optional[str] = Query(None, alias="language.any"),  # noqa: B008
+    language_not: Optional[str] = Query(None, alias="language.not"),  # noqa: B008
+    language_primary: Optional[str] = Query(None, alias="language.primary"),  # noqa: B008
+    country: Optional[str] = Query(None, alias="country"),  # noqa: B008
+    country_any: Optional[str] = Query(None, alias="country.any"),  # noqa: B008
+    country_not: Optional[str] = Query(None, alias="country.not"),  # noqa: B008
+    country_origin: Optional[str] = Query(None, alias="country.origin"),  # noqa: B008
+    cast: Optional[str] = Query(None, alias="cast"),  # noqa: B008
+    cast_any: Optional[str] = Query(None, alias="cast.any"),  # noqa: B008
+    cast_not: Optional[str] = Query(None, alias="cast.not"),  # noqa: B008
+    series: Optional[str] = Query(None, alias="series"),  # noqa: B008
+    series_not: Optional[str] = Query(None, alias="series.not"),  # noqa: B008
+) -> Dict[str, Any]:
+    """Return a filtered list of IMDb IDs matching the given criteria."""
+    if imdb_top is not None and imdb_bottom is not None:
+        raise HTTPException(
+            status_code=400, detail="imdb_top and imdb_bottom are mutually exclusive"
+        )
+
+    if not _db_is_ready():
+        raise HTTPException(status_code=503, detail="Service initializing")
+
+    try:
+        sort_col, sort_dir = _parse_sort(sort_by)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    allowed_tconsts: Optional[set] = None
+    if imdb_top is not None:
+        top_chart = charts.chart_cache.get("top_movies", [])
+        allowed_tconsts = {item["tconst"] for item in top_chart if item["rank"] <= imdb_top}
+    elif imdb_bottom is not None:
+        bottom_chart = charts.chart_cache.get("lowest_rated", [])
+        allowed_tconsts = {item["tconst"] for item in bottom_chart if item["rank"] <= imdb_bottom}
+
+    conditions: list[str] = []
+    params: list = []
+
+    if not adult:
+        conditions.append("tb.isAdult = 0")
+
+    if type:
+        types = [t.strip() for t in type.split(",")]
+        placeholders = ",".join("?" * len(types))
+        conditions.append(f"tb.titleType IN ({placeholders})")  # nosec B608
+        params.extend(types)
+    if type_not:
+        types = [t.strip() for t in type_not.split(",")]
+        placeholders = ",".join("?" * len(types))
+        conditions.append(f"tb.titleType NOT IN ({placeholders})")  # nosec B608
+        params.extend(types)
+
+    if genre:
+        for g in genre.split(","):
+            g = g.strip()
+            conditions.append(
+                "(tb.genres LIKE ? OR tb.genres LIKE ? OR tb.genres LIKE ? OR tb.genres = ?)"
+            )
+            params.extend([f"{g},%", f"%,{g},%", f"%,{g}", g])
+    if genre_any:
+        gs = [g.strip() for g in genre_any.split(",")]
+        sub = " OR ".join(
+            "(tb.genres LIKE ? OR tb.genres LIKE ? OR tb.genres LIKE ? OR tb.genres = ?)"
+            for _ in gs
+        )
+        conditions.append(f"({sub})")
+        for g in gs:
+            params.extend([f"{g},%", f"%,{g},%", f"%,{g}", g])
+    if genre_not:
+        for g in genre_not.split(","):
+            g = g.strip()
+            conditions.append(
+                "(tb.genres NOT LIKE ? AND tb.genres NOT LIKE ? AND tb.genres NOT LIKE ? AND tb.genres != ?)"
+            )
+            params.extend([f"{g},%", f"%,{g},%", f"%,{g}", g])
+
+    if rating_gte is not None:
+        conditions.append("tr.averageRating >= ?")
+        params.append(rating_gte)
+    if rating_lte is not None:
+        conditions.append("tr.averageRating <= ?")
+        params.append(rating_lte)
+    if votes_gte is not None:
+        conditions.append("tr.numVotes >= ?")
+        params.append(votes_gte)
+    if votes_lte is not None:
+        conditions.append("tr.numVotes <= ?")
+        params.append(votes_lte)
+    if runtime_gte is not None:
+        conditions.append("tb.runtimeMinutes >= ?")
+        params.append(runtime_gte)
+    if runtime_lte is not None:
+        conditions.append("tb.runtimeMinutes <= ?")
+        params.append(runtime_lte)
+
+    def _year_from(s: str) -> int:
+        if s.lower() == "today":
+            return date.today().year
+        return int(s[:4])
+
+    if release_after:
+        conditions.append("tb.startYear > ?")
+        params.append(_year_from(release_after))
+    if release_before:
+        conditions.append("tb.startYear < ?")
+        params.append(_year_from(release_before))
+
+    if title:
+        conditions.append("tb.primaryTitle LIKE ?")
+        params.append(f"%{title}%")
+
+    joins: list[str] = []
+    _add_join_filters(
+        joins,
+        conditions,
+        params,
+        language,
+        language_any,
+        language_not,
+        language_primary,
+        country,
+        country_any,
+        country_not,
+        country_origin,
+        cast,
+        cast_any,
+        cast_not,
+        series,
+        series_not,
+    )
+
+    where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
+    join_clause = " ".join(joins)
+
+    sql = f"""
+        SELECT DISTINCT tb.tconst
+        FROM title_basics tb
+        LEFT JOIN title_ratings tr ON tb.tconst = tr.tconst
+        {join_clause}
+        {where_clause}
+        ORDER BY {sort_col} {sort_dir}
+        LIMIT ?
+    """  # nosec B608 — sort_col/sort_dir validated against SORT_COLUMN_MAP
+
+    params.append(limit)
+
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            cursor = await db.execute(sql, params)
+            rows = await cursor.fetchall()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Search error: {e}")
+
+    results = [row[0] for row in rows]
+
+    if allowed_tconsts is not None:
+        results = [t for t in results if t in allowed_tconsts]
+
+    return {"results": results, "total": len(results)}
+
+
+def _add_join_filters(
+    joins: list,
+    conditions: list,
+    params: list,
+    language: Optional[str],
+    language_any: Optional[str],
+    language_not: Optional[str],
+    language_primary: Optional[str],
+    country: Optional[str],
+    country_any: Optional[str],
+    country_not: Optional[str],
+    country_origin: Optional[str],
+    cast: Optional[str],
+    cast_any: Optional[str],
+    cast_not: Optional[str],
+    series: Optional[str],
+    series_not: Optional[str],
+) -> None:
+    """Append WHERE conditions for join-based filters. Implemented in Task 12."""
+    pass  # placeholder — filled in Task 12
 
 
 @app.get("/", response_class=HTMLResponse)

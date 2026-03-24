@@ -729,3 +729,138 @@ def test_get_chart_returns_503_when_initializing(tmp_path, monkeypatch):
     client = TestClient(main.app, raise_server_exceptions=False)
     response = client.get("/chart/top_movies")
     assert response.status_code == 503
+
+
+def _seed_search_db(db_path):
+    """Seed DB with varied data for search tests."""
+    conn = sqlite3.connect(db_path)
+    from importer import create_schema
+
+    create_schema(conn)
+    titles = [
+        ("tt0000001", "movie", "Action Film", "Action Film", 0, 2000, None, 120, "Action,Thriller"),
+        ("tt0000002", "movie", "Comedy Film", "Comedy Film", 0, 2005, None, 90, "Comedy"),
+        ("tt0000003", "tvSeries", "Drama Series", "Drama Series", 0, 2010, None, 45, "Drama"),
+        ("tt0000004", "movie", "Short Film", "Short Film", 0, 2015, None, 10, "Short"),
+        ("tt0000005", "movie", "Adult Film", "Adult Film", 1, 2018, None, 80, "Drama"),
+    ]
+    conn.executemany("INSERT INTO title_basics VALUES (?,?,?,?,?,?,?,?,?)", titles)
+    ratings = [
+        ("tt0000001", 8.5, 100000),
+        ("tt0000002", 7.0, 50000),
+        ("tt0000003", 9.0, 200000),
+        ("tt0000004", 6.0, 5000),
+        ("tt0000005", 5.0, 2000),
+    ]
+    conn.executemany("INSERT INTO title_ratings VALUES (?,?,?)", ratings)
+    conn.commit()
+    conn.close()
+
+
+def test_search_filter_by_type(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?type=movie")
+    assert response.status_code == 200
+    data = response.json()
+    tconsts = set(data["results"])
+    assert "tt0000001" in tconsts
+    assert "tt0000003" not in tconsts  # tvSeries
+
+
+def test_search_filter_by_genre_any(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?genre.any=Action,Comedy")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tt0000001" in data["results"]
+    assert "tt0000002" in data["results"]
+    assert "tt0000003" not in data["results"]  # Drama only
+
+
+def test_search_filter_by_rating_gte(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?rating.gte=8")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tt0000001" in data["results"]  # 8.5
+    assert "tt0000003" in data["results"]  # 9.0
+    assert "tt0000002" not in data["results"]  # 7.0
+
+
+def test_search_excludes_adult_by_default(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tt0000005" not in data["results"]
+
+
+def test_search_includes_adult_when_requested(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?adult=true")
+    assert response.status_code == 200
+    data = response.json()
+    assert "tt0000005" in data["results"]
+
+
+def test_search_sort_by_year_asc(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?sort_by=year.asc&limit=10")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["results"][0] == "tt0000001"  # 2000 is first
+
+
+def test_search_limit(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_search_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/search?limit=2")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["results"]) <= 2
+
+
+def test_search_rejects_imdb_top_and_bottom_together(tmp_path, monkeypatch):
+    import charts
+
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "imdb.db")
+    charts.chart_cache = {"top_movies": [], "lowest_rated": []}
+    client = TestClient(main.app)
+    response = client.get("/search?imdb_top=100&imdb_bottom=50")
+    assert response.status_code == 400
