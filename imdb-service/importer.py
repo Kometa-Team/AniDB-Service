@@ -1,9 +1,12 @@
 """IMDB dataset download and SQLite import."""
 
+import asyncio
 import gzip
 import sqlite3
 from pathlib import Path
 from typing import Optional
+
+import httpx
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS title_basics (
@@ -192,3 +195,46 @@ def import_table(
         except Exception:  # nosec B110
             pass
         raise
+
+
+IMDB_BASE_URL = "https://datasets.imdbws.com"
+
+DATASET_FILES: dict[str, str] = {
+    "title.basics": "title.basics.tsv.gz",
+    "title.ratings": "title.ratings.tsv.gz",
+    "title.akas": "title.akas.tsv.gz",
+    "title.crew": "title.crew.tsv.gz",
+    "title.episode": "title.episode.tsv.gz",
+    "title.principals": "title.principals.tsv.gz",
+    "name.basics": "name.basics.tsv.gz",
+}
+
+
+async def _download_one(client: httpx.AsyncClient, filename: str, dest: Path) -> None:
+    """Stream a single dataset file to disk."""
+    url = f"{IMDB_BASE_URL}/{filename}"
+    print(f"⬇️  Downloading {filename}...")
+    async with client.stream("GET", url, timeout=600.0) as response:
+        response.raise_for_status()
+        with dest.open("wb") as f:
+            async for chunk in response.aiter_bytes(65536):
+                f.write(chunk)
+    print(f"✅ Downloaded {filename}")
+
+
+async def download_datasets(data_dir: Path) -> dict[str, Path]:
+    """
+    Download all 7 IMDB dataset files concurrently to data_dir.
+
+    Returns a dict mapping stem → local Path.
+    """
+    data_dir.mkdir(parents=True, exist_ok=True)
+    paths: dict[str, Path] = {stem: data_dir / filename for stem, filename in DATASET_FILES.items()}
+
+    async with httpx.AsyncClient(timeout=600.0) as client:
+        tasks = [
+            _download_one(client, filename, paths[stem]) for stem, filename in DATASET_FILES.items()
+        ]
+        await asyncio.gather(*tasks)
+
+    return paths

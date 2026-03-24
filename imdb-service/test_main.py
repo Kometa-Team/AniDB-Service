@@ -5,6 +5,7 @@ import io
 import sqlite3
 import tempfile
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -142,3 +143,47 @@ def test_import_table_raises_on_min_rows_not_met(tmp_path):
             min_rows=1000,
         )
     conn.close()
+
+
+@pytest.mark.asyncio
+async def test_download_datasets_creates_files(tmp_path):
+    """download_datasets saves each dataset file to the target directory."""
+    fake_gz_content = b"\x1f\x8b\x08\x00\x00\x00\x00\x00"  # gzip magic bytes
+
+    # Build a mock httpx.AsyncClient that streams fake content
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+
+    async def fake_aiter_bytes(chunk_size=65536):
+        yield fake_gz_content
+
+    mock_resp.aiter_bytes = fake_aiter_bytes
+
+    mock_stream_ctx = AsyncMock()
+    mock_stream_ctx.__aenter__ = AsyncMock(return_value=mock_resp)
+    mock_stream_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    mock_client = AsyncMock()
+    mock_client.stream = MagicMock(return_value=mock_stream_ctx)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("importer.httpx.AsyncClient", return_value=mock_client):
+        from importer import download_datasets
+
+        result = await download_datasets(tmp_path)
+
+    assert len(result) == 7
+    expected_stems = {
+        "title.basics",
+        "title.ratings",
+        "title.akas",
+        "title.crew",
+        "title.episode",
+        "title.principals",
+        "name.basics",
+    }
+    assert set(result.keys()) == expected_stems
+    for _stem, path in result.items():
+        assert path.exists()
+        assert path.name.endswith(".tsv.gz")
