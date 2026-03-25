@@ -450,11 +450,19 @@ def test_stats_returns_initializing_when_no_db(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main, "DB_PATH", tmp_path / "nonexistent.db")
     monkeypatch.setattr(main, "last_refresh", None)
+    monkeypatch.setattr(main, "current_phase", "idle")
+    monkeypatch.setattr(main, "download_progress", {})
+    monkeypatch.setattr(main, "import_progress", {})
+    monkeypatch.setattr(main, "last_activity", None)
     client = TestClient(main.app, raise_server_exceptions=False)
     response = client.get("/stats")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "initializing"
+    assert "phase" in data
+    assert "download_progress" in data
+    assert "import_progress" in data
+    assert "last_activity" in data
 
 
 def test_stats_returns_online_with_db(tmp_path, monkeypatch):
@@ -471,11 +479,15 @@ def test_stats_returns_online_with_db(tmp_path, monkeypatch):
 
     monkeypatch.setattr(main, "DB_PATH", db_path)
     monkeypatch.setattr(main, "last_refresh", "2026-03-24T03:00:00+00:00")
+    monkeypatch.setattr(main, "current_phase", "idle")
+    monkeypatch.setattr(main, "last_activity", None)
     client = TestClient(main.app)
     response = client.get("/stats")
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "online"
+    assert data["phase"] == "idle"
+    assert "last_activity" in data
     assert "last_refresh" in data
     assert data["last_refresh"] == "2026-03-24T03:00:00+00:00"
     for table in (

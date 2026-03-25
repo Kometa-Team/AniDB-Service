@@ -7,7 +7,7 @@ import sqlite3
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import httpx
 
@@ -213,9 +213,17 @@ DATASET_FILES: dict[str, str] = {
 }
 
 
-async def _download_one(client: httpx.AsyncClient, filename: str, dest: Path) -> None:
+async def _download_one(
+    client: httpx.AsyncClient,
+    filename: str,
+    dest: Path,
+    on_start: Optional[Callable[[str], None]] = None,
+    on_done: Optional[Callable[[str], None]] = None,
+) -> None:
     """Stream a single dataset file to disk."""
     url = f"{IMDB_BASE_URL}/{filename}"
+    if on_start:
+        on_start(filename)
     print(f"⬇️  Downloading {filename}...")
     async with client.stream("GET", url, timeout=600.0) as response:
         response.raise_for_status()
@@ -223,9 +231,15 @@ async def _download_one(client: httpx.AsyncClient, filename: str, dest: Path) ->
             async for chunk in response.aiter_bytes(65536):
                 f.write(chunk)
     print(f"✅ Downloaded {filename}")
+    if on_done:
+        on_done(filename)
 
 
-async def download_datasets(data_dir: Path) -> dict[str, Path]:
+async def download_datasets(
+    data_dir: Path,
+    on_file_start: Optional[Callable[[str], None]] = None,
+    on_file_done: Optional[Callable[[str], None]] = None,
+) -> dict[str, Path]:
     """
     Download all 7 IMDB dataset files concurrently to data_dir.
 
@@ -236,7 +250,8 @@ async def download_datasets(data_dir: Path) -> dict[str, Path]:
 
     async with httpx.AsyncClient(timeout=600.0) as client:
         tasks = [
-            _download_one(client, filename, paths[stem]) for stem, filename in DATASET_FILES.items()
+            _download_one(client, filename, paths[stem], on_file_start, on_file_done)
+            for stem, filename in DATASET_FILES.items()
         ]
         await asyncio.gather(*tasks)
 
@@ -296,6 +311,8 @@ def run_full_import(
     gz_paths: dict[str, Path],
     live_db: Path,
     min_rows_override: Optional[int] = None,
+    on_table_start: Optional[Callable[[str], None]] = None,
+    on_table_done: Optional[Callable[[str, int], None]] = None,
 ) -> None:
     """
     Import all dataset files into a shadow DB, then atomically replace live_db.
@@ -328,7 +345,11 @@ def run_full_import(
                 min_rows_override if min_rows_override is not None else MIN_ROWS.get(table, 0)
             )
             print(f"Importing {stem} -> {table}...")
+            if on_table_start:
+                on_table_start(table)
             count = import_table(conn, gz_path, table, columns, min_rows)
+            if on_table_done:
+                on_table_done(table, count)
             print(f"   {count:,} rows")
 
         # Record import timestamp

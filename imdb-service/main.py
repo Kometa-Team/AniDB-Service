@@ -22,6 +22,17 @@ MIN_VOTES_CHART = int(os.getenv("MIN_VOTES_CHART", "25000"))
 # --- Global state ---
 last_refresh: Optional[str] = None  # ISO 8601 UTC string
 refresh_worker_task: Optional[asyncio.Task] = None
+current_phase: str = "idle"  # idle | downloading | importing | building_charts
+download_progress: Dict[str, str] = {}  # dataset stem → pending|downloading|done
+import_progress: Dict[str, Any] = {}  # table → {status, rows}
+last_activity: Optional[str] = None  # ISO timestamp of last phase change
+
+
+def _set_phase(phase: str) -> None:
+    """Update current_phase and last_activity timestamp atomically."""
+    global current_phase, last_activity
+    current_phase = phase
+    last_activity = datetime.now(timezone.utc).isoformat()
 
 
 @asynccontextmanager
@@ -70,12 +81,47 @@ async def lifespan(app: FastAPI):
 
 async def _run_import_pipeline() -> None:
     """Download datasets and import into shadow DB, then rebuild charts."""
-    global last_refresh
-    from importer import download_datasets, run_full_import
+    global last_refresh, download_progress, import_progress
+    from importer import DATASET_FILES, STEM_TO_TABLE, download_datasets, run_full_import
 
     print("🔄 Starting daily refresh...")
-    gz_paths = await download_datasets(DATA_DIR)
-    await asyncio.to_thread(run_full_import, gz_paths, DB_PATH)
+
+    # --- Download phase ---
+    _set_phase("downloading")
+    download_progress = {stem: "pending" for stem in DATASET_FILES}
+    import_progress = {}
+
+    def _on_file_start(filename: str) -> None:
+        for stem, fname in DATASET_FILES.items():
+            if fname == filename:
+                download_progress[stem] = "downloading"
+                break
+
+    def _on_file_done(filename: str) -> None:
+        for stem, fname in DATASET_FILES.items():
+            if fname == filename:
+                download_progress[stem] = "done"
+                break
+
+    gz_paths = await download_datasets(DATA_DIR, _on_file_start, _on_file_done)
+
+    # --- Import phase ---
+    _set_phase("importing")
+    import_progress = {
+        STEM_TO_TABLE[stem]: {"status": "pending", "rows": 0}
+        for stem in gz_paths
+        if stem in STEM_TO_TABLE
+    }
+
+    def _on_table_start(table: str) -> None:
+        import_progress[table] = {"status": "importing", "rows": 0}
+
+    def _on_table_done(table: str, count: int) -> None:
+        import_progress[table] = {"status": "done", "rows": count}
+
+    await asyncio.to_thread(
+        run_full_import, gz_paths, DB_PATH, None, _on_table_start, _on_table_done
+    )
 
     try:
         async with aiosqlite.connect(DB_PATH) as db:
@@ -86,7 +132,11 @@ async def _run_import_pipeline() -> None:
     except Exception as e:
         print(f"⚠️  Could not read last_refresh after import: {e}")
 
+    # --- Chart rebuild phase ---
+    _set_phase("building_charts")
     await asyncio.to_thread(charts.rebuild_all_charts, DB_PATH, MIN_VOTES_CHART)
+
+    _set_phase("idle")
     print("✅ Refresh complete")
 
 
@@ -522,9 +572,15 @@ async def root(request: Request) -> HTMLResponse:
 
 @app.get("/stats")
 async def get_stats() -> Dict[str, Any]:
-    """Return service health: status, last refresh time, and per-table row counts."""
+    """Return service health: status, phase, progress indicators, and per-table row counts."""
     if not _db_is_ready():
-        return {"status": "initializing"}
+        return {
+            "status": "initializing",
+            "phase": current_phase,
+            "download_progress": download_progress,
+            "import_progress": import_progress,
+            "last_activity": last_activity,
+        }
 
     try:
         async with aiosqlite.connect(DB_PATH) as db:
@@ -544,7 +600,9 @@ async def get_stats() -> Dict[str, Any]:
 
         return {
             "status": "online",
+            "phase": current_phase,
             "last_refresh": last_refresh,
+            "last_activity": last_activity,
             "table_counts": counts,
             "charts_cached": list(charts.chart_cache.keys()),
         }
