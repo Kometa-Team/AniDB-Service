@@ -216,6 +216,17 @@ DATASET_FILES: dict[str, str] = {
 }
 
 
+MIN_FILE_BYTES: dict[str, int] = {
+    "title.basics.tsv.gz": 50_000_000,
+    "title.ratings.tsv.gz": 5_000_000,
+    "title.akas.tsv.gz": 100_000_000,
+    "title.crew.tsv.gz": 50_000_000,
+    "title.episode.tsv.gz": 30_000_000,
+    "title.principals.tsv.gz": 200_000_000,
+    "name.basics.tsv.gz": 150_000_000,
+}
+
+
 async def _download_one(
     client: httpx.AsyncClient,
     filename: str,
@@ -223,7 +234,15 @@ async def _download_one(
     on_start: Optional[Callable[[str], None]] = None,
     on_done: Optional[Callable[[str], None]] = None,
 ) -> None:
-    """Stream a single dataset file to disk."""
+    """Stream a single dataset file to disk, skipping if already present and large enough."""
+    min_bytes = MIN_FILE_BYTES.get(filename, 0)
+    if dest.exists() and dest.stat().st_size >= min_bytes:
+        print(f"⏭️  Skipping {filename} (already downloaded)")
+        if on_start:
+            on_start(filename)
+        if on_done:
+            on_done(filename)
+        return
     url = f"{IMDB_BASE_URL}/{filename}"
     if on_start:
         on_start(filename)
