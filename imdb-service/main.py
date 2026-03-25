@@ -436,19 +436,86 @@ async def root(request: Request) -> HTMLResponse:
         base += ROOT_PATH
     return HTMLResponse(
         content=f"""<!DOCTYPE html>
-<html><head><title>IMDB Service</title></head>
+<html>
+<head>
+    <title>IMDB Service</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
+        }}
+        h1 {{ color: #2c3e50; }}
+        code {{
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }}
+        .endpoint {{
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 4px solid #007bff;
+            border-radius: 4px;
+        }}
+        a {{ color: #007bff; text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+    </style>
+</head>
 <body>
-<h1>IMDB Service</h1>
-<p>Cached IMDB public dataset service for Kometa.</p>
-<ul>
-  <li><a href="{base}/stats">GET /stats</a> — service health</li>
-  <li><a href="{base}/title/tt0111161">GET /title/{{imdb_id}}</a> — title lookup</li>
-  <li><a href="{base}/person/nm0000093">GET /person/{{imdb_id}}</a> — person lookup</li>
-  <li><a href="{base}/chart/top_movies">GET /chart/{{chart_name}}</a> — pre-computed charts</li>
-  <li><a href="{base}/search?type=movie&rating.gte=8&limit=10">GET /search</a> — filtered search</li>
-</ul>
-<p>Available charts: top_movies, top_shows, lowest_rated, top_english, top_indian, top_tamil, top_telugu, top_malayalam</p>
-</body></html>
+    <h1>🎬 IMDB Service</h1>
+    <p>A caching service for IMDB public dataset metadata with daily updates and pre-computed charts.</p>
+
+    <h2>API Endpoints</h2>
+
+    <div class="endpoint">
+        <strong>GET /stats</strong> - Service status and table row counts<br>
+        <code>curl {base}/stats</code>
+    </div>
+
+    <div class="endpoint">
+        <strong>GET /title/{{imdb_id}}</strong> - Full title record by IMDb ID<br>
+        <code>curl {base}/title/tt0111161</code>
+    </div>
+
+    <div class="endpoint">
+        <strong>GET /person/{{imdb_id}}</strong> - Person record by IMDb person ID<br>
+        <code>curl {base}/person/nm0000199</code>
+    </div>
+
+    <div class="endpoint">
+        <strong>GET /chart/{{chart_name}}</strong> - Pre-computed ranked chart<br>
+        <code>curl "{base}/chart/top_movies?limit=10"</code><br>
+        Available charts: top_movies, top_shows, lowest_rated, top_english, top_indian, top_tamil, top_telugu, top_malayalam
+    </div>
+
+    <div class="endpoint">
+        <strong>GET /search</strong> - Filtered title search returning IMDb IDs<br>
+        <code>curl "{base}/search?type=movie&amp;rating.gte=8&amp;limit=10"</code>
+    </div>
+
+    <h2>API Documentation</h2>
+
+    <div class="endpoint">
+        <strong><a href="{base}/docs">Swagger UI</a></strong> - Interactive API documentation<br>
+        Try out endpoints directly from your browser
+    </div>
+
+    <div class="endpoint">
+        <strong><a href="{base}/redoc">ReDoc</a></strong> - Alternative API documentation<br>
+        Clean, readable documentation format
+    </div>
+
+    <div class="endpoint">
+        <strong><a href="{base}/openapi.json">OpenAPI Schema</a></strong> - Machine-readable API specification<br>
+        JSON schema for automated tools and clients
+    </div>
+</body>
+</html>
 """
     )
 
