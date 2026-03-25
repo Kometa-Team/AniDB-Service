@@ -155,6 +155,7 @@ def import_table(
     table: str,
     columns: list[str],
     min_rows: int,
+    on_progress: Optional[Callable[[int], None]] = None,
 ) -> int:
     """
     Parse a gzip TSV file and bulk-insert into the given table.
@@ -181,6 +182,8 @@ def import_table(
                     conn.executemany(sql, batch)
                     count += len(batch)
                     batch = []
+                    if on_progress:
+                        on_progress(count)
             if batch:
                 conn.executemany(sql, batch)
                 count += len(batch)
@@ -313,6 +316,7 @@ def run_full_import(
     min_rows_override: Optional[int] = None,
     on_table_start: Optional[Callable[[str], None]] = None,
     on_table_done: Optional[Callable[[str, int], None]] = None,
+    on_table_progress: Optional[Callable[[str, int], None]] = None,
 ) -> None:
     """
     Import all dataset files into a shadow DB, then atomically replace live_db.
@@ -347,7 +351,9 @@ def run_full_import(
             print(f"Importing {stem} -> {table}...")
             if on_table_start:
                 on_table_start(table)
-            count = import_table(conn, gz_path, table, columns, min_rows)
+            _t, _cb = table, on_table_progress
+            _progress_cb = (lambda t, cb: lambda n: cb(t, n))(_t, _cb) if _cb else None
+            count = import_table(conn, gz_path, table, columns, min_rows, _progress_cb)
             if on_table_done:
                 on_table_done(table, count)
             print(f"   {count:,} rows")

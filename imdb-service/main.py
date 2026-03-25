@@ -116,11 +116,20 @@ async def _run_import_pipeline() -> None:
     def _on_table_start(table: str) -> None:
         import_progress[table] = {"status": "importing", "rows": 0}
 
+    def _on_table_progress(table: str, count: int) -> None:
+        import_progress[table] = {"status": "importing", "rows": count}
+
     def _on_table_done(table: str, count: int) -> None:
         import_progress[table] = {"status": "done", "rows": count}
 
     await asyncio.to_thread(
-        run_full_import, gz_paths, DB_PATH, None, _on_table_start, _on_table_done
+        run_full_import,
+        gz_paths,
+        DB_PATH,
+        None,
+        _on_table_start,
+        _on_table_done,
+        _on_table_progress,
     )
 
     try:
