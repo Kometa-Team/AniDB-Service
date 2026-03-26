@@ -285,7 +285,7 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
         if not is_fresh(list_file):
             key = cfg["key"]
             pending_keys.add(key)
-            await refresh_queue.put(key)
+            refresh_queue.put_nowait(key)
 
     print("✅ SIMKL Service ready")
     yield
