@@ -82,6 +82,15 @@ yourdomain.com {
         reverse_proxy simkl-oauth:5000
     }
 
+    # Handle /imdb-service path
+    # FastAPI service serving IMDB dataset API
+    handle /imdb-service* {
+        uri strip_prefix /imdb-service
+        reverse_proxy imdb-service:8000 {
+            header_up X-Script-Name /imdb-service
+        }
+    }
+
     # Handle root path - serve static landing page
     handle / {
         root * /var/www/html

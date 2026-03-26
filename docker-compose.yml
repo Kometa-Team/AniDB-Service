@@ -136,6 +136,25 @@ services:
       retries: 3
       start_period: 10s
 
+  imdb-service:
+    image: ghcr.io/kometa-team/imdb-service:latest
+    container_name: imdb-service
+    restart: unless-stopped
+    environment:
+      - ROOT_PATH=/imdb-service
+      - REFRESH_HOUR=3
+      - DATA_DIR=/app/data
+      - TMP_DIR=/app/data
+      - MIN_VOTES_CHART=25000
+    volumes:
+      - imdb-data:/app/data
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
   caddy:
     image: caddy:latest
     container_name: caddy
@@ -154,6 +173,7 @@ services:
 
 volumes:
   anidb-data:
+  imdb-data:
   anidb-db:
   simkl-data:
   fider-db:

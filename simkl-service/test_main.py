@@ -58,9 +58,16 @@ def clean_data_dir():
 
 @pytest.fixture
 def test_client(clean_data_dir):
-    """Yield a TestClient with the full app lifespan (startup/shutdown)."""
-    with TestClient(app) as client:
-        yield client
+    """Yield a TestClient with the full app lifespan (startup/shutdown).
+
+    Patches fetch_and_cache_list with a no-op AsyncMock so the background
+    refresh worker never makes real HTTP calls to SIMKL during tests.
+    Individual tests that need custom fetch behaviour re-patch the function
+    inside their own ``with patch(...)`` block, which takes precedence.
+    """
+    with patch("main.fetch_and_cache_list", new_callable=AsyncMock):
+        with TestClient(app) as client:
+            yield client
 
 
 @pytest.fixture
