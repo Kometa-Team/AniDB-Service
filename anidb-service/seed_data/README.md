@@ -1,6 +1,6 @@
 # Seed Data Directory
 
-This directory contains initial AniDB XML data for seeding the cache.
+If this directory contains AniDB XML data, then on startup the database will be seeded.
 
 ## Usage
 
@@ -15,6 +15,12 @@ This directory contains initial AniDB XML data for seeding the cache.
 - **Supported:** `.zip` files containing `.xml` files
 - **Naming:** Any zip filename is acceptable (first found will be used)
 - **Structure:** XML files can be in root or subdirectories within the zip
+
+## Source
+
+One such archive of AniDB XML Files is available [here](https://files.shokoanime.com/files/shoko-server/other/Anime_HTTP.zip).
+
+On Mar 26, 2026, that ZIP contained 15638 AniDB XML files.
 
 ## Example
 
