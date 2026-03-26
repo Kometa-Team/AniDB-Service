@@ -34,6 +34,7 @@ ANIDB_PASSWORD = os.getenv("ANIDB_PASSWORD", "")  # For accessing mature content
 update_queue: Optional[asyncio.Queue] = None
 pending_aids: set = set()
 worker_task: Optional[asyncio.Task] = None
+rate_limit_until: Optional[datetime] = None  # set when AniDB returns 429
 
 
 async def init_database() -> None:
@@ -203,6 +204,17 @@ async def fetch_from_anidb(aid: int) -> str:
             await log_api_request(aid, success=True)
             return str(response.text)
 
+    except httpx.HTTPStatusError as e:
+        await log_api_request(aid, success=False)
+        if e.response.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="AniDB rate limit (429) — backing off for 24 hours",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"AniDB API error: {str(e)}",
+        )
     except httpx.HTTPError as e:
         await log_api_request(aid, success=False)
         raise HTTPException(
@@ -213,11 +225,23 @@ async def fetch_from_anidb(aid: int) -> str:
 
 async def anidb_worker() -> None:
     """Background worker that processes the update queue with throttling."""
+    global rate_limit_until
     print("🚀 AniDB worker started")
 
     while True:
         aid = 0
         try:
+            # Honour any active 429 back-off before pulling from the queue
+            if rate_limit_until is not None:
+                delay = (rate_limit_until - datetime.now()).total_seconds()
+                if delay > 0:
+                    print(
+                        f"⏸️ AniDB rate-limited — pausing worker for "
+                        f"{delay / 3600:.1f}h (until {rate_limit_until.isoformat()})"
+                    )
+                    await asyncio.sleep(delay)
+                rate_limit_until = None
+
             aid = await update_queue.get()
 
             if aid in pending_aids:
@@ -245,7 +269,14 @@ async def anidb_worker() -> None:
             # Worker is being shut down, don't call task_done
             break
         except Exception as e:
-            print(f"❌ Worker error for AID {aid}: {e}")
+            if isinstance(e, HTTPException) and e.status_code == status.HTTP_429_TOO_MANY_REQUESTS:
+                rate_limit_until = datetime.now() + timedelta(hours=24)
+                print(f"🚫 AniDB 429 — suspending requests until {rate_limit_until.isoformat()}")
+                if aid:
+                    pending_aids.add(aid)
+                    await update_queue.put(aid)
+            else:
+                print(f"❌ Worker error for AID {aid}: {e}")
             update_queue.task_done()
 
 
@@ -568,6 +599,7 @@ async def get_stats() -> Dict[str, Any]:
             "api_calls_last_24h": daily,
             "queue_size": update_queue.qsize(),
             "daily_limit": DAILY_LIMIT,
+            "rate_limit_until": rate_limit_until.isoformat() if rate_limit_until else None,
         }
     except Exception as e:
         raise HTTPException(

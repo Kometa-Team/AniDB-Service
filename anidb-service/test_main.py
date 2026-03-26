@@ -280,7 +280,9 @@ def test_stats_endpoint_structure(test_client):
     assert "api_calls_last_24h" in data
     assert "queue_size" in data
     assert "daily_limit" in data
+    assert "rate_limit_until" in data
     assert data["daily_limit"] == 10
+    assert data["rate_limit_until"] is None  # not rate-limited by default
 
 
 def test_anime_endpoint_invalid_aid(test_client):
@@ -972,6 +974,43 @@ async def test_anidb_worker_cancellation(clean_test_env):
             await worker_task
         except asyncio.CancelledError:
             pass  # Expected
+
+
+@pytest.mark.asyncio
+async def test_anidb_worker_429_sets_rate_limit(clean_test_env):
+    """Test that a 429 from AniDB sets rate_limit_until and re-queues the aid."""
+    import main
+
+    test_queue = asyncio.Queue()
+    test_pending = set()
+
+    rate_limit_exc = HTTPException(status_code=429, detail="AniDB rate limit")
+
+    with patch("main.fetch_from_anidb", side_effect=rate_limit_exc):
+        with patch("main.update_queue", test_queue):
+            with patch("main.pending_aids", test_pending):
+                with patch.object(main, "rate_limit_until", None):
+                    test_pending.add(1)
+                    await test_queue.put(1)
+
+                    worker_task = asyncio.create_task(main.anidb_worker())
+
+                    # Let the worker process the item and hit the 429
+                    await asyncio.sleep(0.2)
+
+                    worker_task.cancel()
+                    try:
+                        await worker_task
+                    except asyncio.CancelledError:
+                        pass
+
+                    # The aid must have been re-queued
+                    assert not test_queue.empty()
+                    requeued = test_queue.get_nowait()
+                    assert requeued == 1
+
+                    # rate_limit_until must be set on the module
+                    assert main.rate_limit_until is not None
 
 
 @pytest.mark.asyncio
