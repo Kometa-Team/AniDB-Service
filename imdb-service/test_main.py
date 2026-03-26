@@ -468,10 +468,22 @@ def test_stats_returns_initializing_when_no_db(tmp_path, monkeypatch):
 def test_stats_returns_online_with_db(tmp_path, monkeypatch):
     db_path = tmp_path / "imdb.db"
     conn = sqlite3.connect(db_path)
+    import json
+
     from importer import create_schema
 
+    row_counts = {
+        "title_basics": 100,
+        "title_ratings": 50,
+        "title_akas": 200,
+        "title_crew": 100,
+        "title_episode": 30,
+        "title_principals": 150,
+        "name_basics": 80,
+    }
     create_schema(conn)
     conn.execute("INSERT INTO import_meta VALUES ('last_refresh', '2026-03-24T03:00:00+00:00')")
+    conn.execute("INSERT INTO import_meta VALUES ('row_counts', ?)", (json.dumps(row_counts),))
     conn.commit()
     conn.close()
 
@@ -490,16 +502,9 @@ def test_stats_returns_online_with_db(tmp_path, monkeypatch):
     assert "last_activity" in data
     assert "last_refresh" in data
     assert data["last_refresh"] == "2026-03-24T03:00:00+00:00"
-    for table in (
-        "title_basics",
-        "title_ratings",
-        "title_akas",
-        "title_crew",
-        "title_episode",
-        "title_principals",
-        "name_basics",
-    ):
+    for table in row_counts:
         assert table in data["table_counts"], f"Missing table count: {table}"
+        assert data["table_counts"][table] == row_counts[table]
     assert "charts_cached" in data
 
 

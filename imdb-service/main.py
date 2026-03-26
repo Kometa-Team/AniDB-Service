@@ -1,6 +1,7 @@
 """IMDB Service - FastAPI caching service for IMDB public datasets."""
 
 import asyncio
+import json
 import os
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
@@ -593,19 +594,9 @@ async def get_stats() -> Dict[str, Any]:
 
     try:
         async with aiosqlite.connect(DB_PATH) as db:
-            counts: Dict[str, int] = {}
-            for table in (
-                "title_basics",
-                "title_ratings",
-                "title_akas",
-                "title_crew",
-                "title_episode",
-                "title_principals",
-                "name_basics",
-            ):
-                cursor = await db.execute(f"SELECT COUNT(*) FROM {table}")  # nosec B608
-                row = await cursor.fetchone()
-                counts[table] = row[0] if row else 0
+            cursor = await db.execute("SELECT value FROM import_meta WHERE key = 'row_counts'")
+            row = await cursor.fetchone()
+            counts: Dict[str, Any] = json.loads(row[0]) if row else {}
 
         return {
             "status": "online",

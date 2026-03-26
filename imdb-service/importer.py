@@ -2,6 +2,7 @@
 
 import asyncio
 import gzip
+import json
 import os
 import sqlite3
 import traceback
@@ -46,6 +47,8 @@ CREATE TABLE IF NOT EXISTS title_akas (
 CREATE INDEX IF NOT EXISTS idx_aka_tconst ON title_akas(tconst);
 CREATE INDEX IF NOT EXISTS idx_aka_region ON title_akas(region);
 CREATE INDEX IF NOT EXISTS idx_aka_language ON title_akas(language);
+CREATE INDEX IF NOT EXISTS idx_aka_lang_tconst ON title_akas(language, tconst);
+CREATE INDEX IF NOT EXISTS idx_aka_region_tconst ON title_akas(region, tconst);
 
 CREATE TABLE IF NOT EXISTS title_crew (
     tconst TEXT PRIMARY KEY,
@@ -359,6 +362,7 @@ def run_full_import(
         create_schema(conn)
         conn.commit()
 
+        row_counts: dict[str, int] = {}
         for stem, gz_path in gz_paths.items():
             table = STEM_TO_TABLE.get(stem)
             if table is None:
@@ -374,14 +378,19 @@ def run_full_import(
             _t, _cb = table, on_table_progress
             _progress_cb = (lambda t, cb: lambda n: cb(t, n))(_t, _cb) if _cb else None
             count = import_table(conn, gz_path, table, columns, min_rows, _progress_cb)
+            row_counts[table] = count
             if on_table_done:
                 on_table_done(table, count)
             print(f"   {count:,} rows")
 
-        # Record import timestamp
+        # Record import timestamp and row counts
         conn.execute(
             "INSERT OR REPLACE INTO import_meta VALUES (?, ?)",
             ("last_refresh", datetime.now(timezone.utc).isoformat()),
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO import_meta VALUES (?, ?)",
+            ("row_counts", json.dumps(row_counts)),
         )
         conn.commit()
         conn.close()
