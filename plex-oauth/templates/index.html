@@ -4,208 +4,127 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Plex OAuth - Kometa</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        :root {
+            --plex-orange: #E5A00D;
+            --plex-orange-dark: #C98B00;
+            --plex-orange-glow: rgba(229, 160, 13, 0.25);
+            --bg-page: #141414;
+            --bg-card: #1f1f1f;
+            --bg-inset: #161616;
+            --border: rgba(255, 255, 255, 0.07);
+            --text: #f0f0f0;
+            --muted: #999;
+            --dim: #777;
         }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: "Nunito", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg-page);
+            color: var(--text);
             min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
             padding: 20px;
         }
-
         .container {
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            background: var(--bg-card);
+            border-radius: 14px;
+            border-top: 3px solid var(--plex-orange);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
             padding: 40px;
-            max-width: 500px;
+            max-width: 520px;
             width: 100%;
         }
-
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-
-        .header h1 {
-            font-size: 2rem;
-            color: #333;
-            margin-bottom: 10px;
-        }
-
-        .header p {
-            color: #666;
-            font-size: 1rem;
-        }
-
-        .status {
-            margin: 20px 0;
-            padding: 15px;
-            border-radius: 5px;
-            text-align: center;
-            display: none;
-        }
-
-        .status.info {
-            background: #e3f2fd;
-            color: #1565c0;
-            border: 1px solid #90caf9;
-        }
-
-        .status.success {
-            background: #e8f5e9;
-            color: #2e7d32;
-            border: 1px solid #81c784;
-        }
-
-        .status.error {
-            background: #ffebee;
-            color: #c62828;
-            border: 1px solid #ef5350;
-        }
-
+        .plex-logo { display: block; width: 48px; height: 48px; margin: 0 auto 18px; }
+        .header { text-align: center; margin-bottom: 28px; }
+        .header h1 { font-size: 1.8rem; font-weight: 800; color: var(--plex-orange); margin-bottom: 8px; letter-spacing: -0.3px; }
+        .header p { color: var(--muted); font-size: 0.95rem; }
+        .status { margin: 18px 0; padding: 12px 15px; border-radius: 6px; text-align: center; display: none; font-size: 0.92rem; font-weight: 600; }
+        .status.info    { background: rgba(100,140,200,.12); color: #88aee0; border: 1px solid rgba(100,140,200,.25); }
+        .status.success { background: rgba(40,180,100,.12);  color: #5dbb88; border: 1px solid rgba(40,180,100,.25);  }
+        .status.error   { background: rgba(220,53,69,.12);   color: #f08090; border: 1px solid rgba(220,53,69,.25);   }
         .button {
             width: 100%;
-            padding: 12px;
+            padding: 13px;
             border: none;
-            border-radius: 5px;
-            font-size: 1rem;
+            border-radius: 8px;
+            font-size: 0.97rem;
+            font-weight: 700;
+            font-family: inherit;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: background 0.2s, box-shadow 0.2s, transform 0.15s;
             margin: 10px 0;
         }
-
-        .button.primary {
-            background: #667eea;
-            color: white;
-        }
-
-        .button.primary:hover {
-            background: #5568d3;
-        }
-
-        .button.primary:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-
-        .button.secondary {
-            background: #f0f0f0;
-            color: #333;
-            border: 1px solid #ddd;
-        }
-
-        .button.secondary:hover {
-            background: #e0e0e0;
-        }
-
-        .pin-display {
-            background: #f5f5f5;
-            padding: 20px;
-            border-radius: 5px;
-            margin: 20px 0;
-            text-align: center;
-            display: none;
-        }
-
-        .pin-code {
-            font-size: 24px;
-            font-weight: bold;
-            color: #667eea;
-            font-family: monospace;
-            margin: 10px 0;
-        }
-
-        .pin-instructions {
-            font-size: 0.9rem;
-            color: #666;
-            margin-top: 10px;
-        }
-
-        .token-section {
-            display: none;
-            margin-top: 20px;
-        }
-
+        .button.primary { background: var(--plex-orange); color: #111; }
+        .button.primary:hover { background: var(--plex-orange-dark); transform: translateY(-1px); box-shadow: 0 5px 15px var(--plex-orange-glow); }
+        .button.primary:disabled { background: #3a3a3a; color: #666; cursor: not-allowed; transform: none; box-shadow: none; }
+        .button.secondary { background: rgba(255,255,255,.05); color: var(--muted); border: 1px solid var(--border); }
+        .button.secondary:hover { background: rgba(255,255,255,.09); color: var(--text); }
+        .pin-display { background: var(--bg-inset); border: 1px solid var(--border); padding: 24px 20px; border-radius: 10px; margin: 20px 0; text-align: center; display: none; }
+        .pin-code { font-size: 2rem; font-weight: 800; color: var(--plex-orange); font-family: "Courier New", monospace; margin: 10px 0; letter-spacing: 4px; }
+        .pin-instructions { font-size: 0.88rem; color: var(--muted); margin-top: 10px; line-height: 1.6; }
+        .token-section { display: none; margin-top: 20px; }
         .token-display {
-            background: #f5f5f5;
-            padding: 15px;
-            border-radius: 5px;
+            background: var(--bg-inset);
+            border: 1.5px solid var(--plex-orange);
+            padding: 15px 18px;
+            border-radius: 8px;
             margin: 10px 0;
             word-break: break-all;
-            font-family: monospace;
-            font-size: 0.85rem;
+            font-family: "Courier New", monospace;
+            font-size: 0.82rem;
+            color: var(--plex-orange);
+            line-height: 1.5;
         }
-
         .copy-btn {
-            background: #4caf50;
-            color: white;
-            padding: 10px 20px;
+            background: var(--plex-orange);
+            color: #111;
+            padding: 10px 22px;
             border: none;
-            border-radius: 5px;
+            border-radius: 7px;
             cursor: pointer;
             font-size: 0.9rem;
-            transition: all 0.3s ease;
+            font-weight: 700;
+            font-family: inherit;
+            transition: background 0.2s, box-shadow 0.2s;
         }
-
-        .copy-btn:hover {
-            background: #45a049;
-        }
-
-        .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255, 255, 255, 0.3);
-            border-radius: 50%;
-            border-top-color: white;
-            animation: spin 1s ease-in-out infinite;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        .instructions {
-            background: #f0f4ff;
-            border-left: 4px solid #667eea;
-            padding: 15px;
-            margin: 20px 0;
-            border-radius: 3px;
-            font-size: 0.9rem;
-            color: #333;
-        }
-
-        .instructions ol {
-            margin-left: 20px;
-        }
-
-        .instructions li {
-            margin: 8px 0;
-        }
-
-        .footer {
-            text-align: center;
-            margin-top: 30px;
-            font-size: 0.85rem;
-            color: #999;
+        .copy-btn:hover { background: var(--plex-orange-dark); box-shadow: 0 4px 12px var(--plex-orange-glow); }
+        .loading { display: inline-block; width: 18px; height: 18px; border: 3px solid rgba(255,255,255,.2); border-radius: 50%; border-top-color: rgba(255,255,255,.8); animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .instructions { background: rgba(229,160,13,.07); border-left: 4px solid var(--plex-orange); padding: 14px 16px; margin: 20px 0; border-radius: 0 6px 6px 0; font-size: 0.9rem; line-height: 1.55; }
+        .instructions ol { margin-left: 20px; }
+        .instructions li { margin: 7px 0; }
+        .account-panel { margin-top: 22px; padding: 18px; background: rgba(255,255,255,.04); border: 1px solid var(--border); border-radius: 10px; }
+        .account-panel h3 { margin-bottom: 14px; color: var(--muted); font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; }
+        .account-grid { display: grid; gap: 10px; }
+        .account-row { font-size: 0.92rem; }
+        .account-row strong { color: var(--plex-orange); }
+        .admin-badge { background: rgba(220,53,69,.85); color: #fff; padding: 1px 8px; border-radius: 4px; font-size: 0.72rem; font-weight: 700; margin-left: 8px; display: none; }
+        .footer { text-align: center; margin-top: 28px; font-size: 0.82rem; color: var(--dim); line-height: 1.7; }
+        .footer a { color: var(--plex-orange); text-decoration: none; opacity: 0.8; }
+        .footer a:hover { opacity: 1; }
+        @media (max-width: 600px) {
+            .container { padding: 26px 16px; }
+            .header h1 { font-size: 1.45rem; }
+            .pin-code { font-size: 1.5rem; }
         }
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- Plex logo mark -->
+        <svg class="plex-logo" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-label="Plex">
+            <rect width="48" height="48" rx="10" fill="#E5A00D"/>
+            <path d="M19 12 L37 24 L19 36 Z" fill="#141414"/>
+        </svg>
+
         <div class="header">
-            <h1>🎬 Plex OAuth</h1>
+            <h1>Plex OAuth</h1>
             <p>Get your Plex access token for Kometa</p>
         </div>
 
@@ -226,52 +145,51 @@
         </div>
 
         <div id="pinSection" class="pin-display">
-            <div style="font-size: 0.9rem; color: #666; margin-bottom: 10px;">Your PIN Code</div>
+            <div style="font-size: 0.85rem; color: var(--muted); margin-bottom: 8px;">Your PIN Code</div>
             <div class="pin-code" id="pinCode">-</div>
             <div class="pin-instructions">
                 Open this link in your browser:<br>
-                <a id="authLink" href="#" target="_blank" style="color: #667eea; text-decoration: underline;">Authenticate with Plex</a>
+                <a id="authLink" href="#" target="_blank" style="color: var(--plex-orange); text-decoration: underline;">Authenticate with Plex</a>
             </div>
-            <div style="margin-top: 15px; font-size: 0.85rem; color: #666;">
-            Waiting for authorization...
+            <div style="margin-top: 15px; font-size: 0.85rem; color: var(--muted);">
+                Waiting for authorization…
             </div>
         </div>
 
         <div id="tokenSection" class="token-section">
-            <div style="font-size: 0.9rem; color: #666; margin-bottom: 10px;">Your Plex Access Token</div>
+            <div style="font-size: 0.85rem; color: var(--muted); margin-bottom: 8px;">Your Plex Access Token</div>
             <div class="token-display" id="tokenDisplay">-</div>
             <button class="copy-btn" onclick="copyToken()">📋 Copy Token</button>
 
-            <div style="margin-top: 25px; padding: 15px; background: #f0f4ff; border-radius: 5px;">
-                <h3 style="margin-bottom: 15px; color: #333; font-size: 1rem;">Account Information</h3>
-                <div style="display: flex; align-items: center; margin-bottom: 15px;">
-                    <img id="avatarDisplay" src="" alt="Avatar" style="width: 60px; height: 60px; border-radius: 50%; margin-right: 15px; display: none; background: #e0e0e0;">
-                    <div style="display: none;" id="avatarPlaceholder" style="width: 60px; height: 60px; border-radius: 50%; margin-right: 15px; background: #e0e0e0; display: flex; align-items: center; justify-content: center; color: #999;">👤</div>
+            <div class="account-panel">
+                <h3>Account Information</h3>
+                <div style="display: flex; align-items: center; margin-bottom: 14px;">
+                    <img id="avatarDisplay" src="" alt="Avatar" style="width: 52px; height: 52px; border-radius: 50%; margin-right: 14px; display: none; border: 2px solid var(--plex-orange);">
                 </div>
-                <div style="display: grid; gap: 10px;">
-                    <div>
-                        <strong style="color: #667eea;">Username:</strong> <span id="username" style="color: #333;">-</span>
-                        <span id="adminBadge" style="background: #ff6b6b; color: white; padding: 2px 8px; border-radius: 3px; font-size: 0.75rem; margin-left: 8px; display: none;">ADMIN</span>
+                <div class="account-grid">
+                    <div class="account-row">
+                        <strong>Username:</strong> <span id="username">-</span>
+                        <span id="adminBadge" class="admin-badge">ADMIN</span>
                     </div>
-                    <div>
-                        <strong style="color: #667eea;">Display Name:</strong> <span id="title" style="color: #333;">-</span>
+                    <div class="account-row">
+                        <strong>Display Name:</strong> <span id="title">-</span>
                     </div>
-                    <div>
-                        <strong style="color: #667eea;">Email:</strong> <span id="email" style="color: #333;">-</span>
+                    <div class="account-row">
+                        <strong>Email:</strong> <span id="email">-</span>
                     </div>
-                    <div>
-                        <strong style="color: #667eea;">User ID:</strong> <span id="userId" style="color: #333; font-family: monospace; font-size: 16px;">-</span>
+                    <div class="account-row">
+                        <strong>User ID:</strong> <span id="userId" style="font-family: monospace;">-</span>
                     </div>
                 </div>
             </div>
 
-            <button class="button secondary" onclick="resetApp()" style="margin-top: 20px;">Get Another Token</button>
+            <button class="button secondary" onclick="resetApp()" style="margin-top: 18px;">Get Another Token</button>
         </div>
 
         <div class="footer">
             <p>This token is for use with Kometa and Plex-based applications</p>
             <p>Never share your token with anyone you don't trust</p>
-            <p><a href="/" style="color: #667eea; text-decoration: none;">← Back to Home</a></p>
+            <p><a href="/">← Back to Home</a></p>
         </div>
     </div>
 

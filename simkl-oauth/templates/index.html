@@ -5,15 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SIMKL OAuth - Kometa</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        /* --- SIMKL brand tokens --- */
+        :root {
+            --simkl-teal:       #1CE8B5;
+            --simkl-teal-dark:  #13B98E;
+            --simkl-teal-glow:  rgba(28, 232, 181, 0.18);
+            --bg-page:          #0d0d1a;
+            --bg-card:          #16161e;
+            --bg-inset:         #0a0a13;
+            --border-subtle:    rgba(255, 255, 255, 0.07);
+            --text-primary:     #f0f0f0;
+            --text-muted:       #888;
+            --text-dim:         #444;
         }
 
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+            background: var(--bg-page);
+            color: var(--text-primary);
             min-height: 100vh;
             display: flex;
             justify-content: center;
@@ -22,150 +33,147 @@
         }
 
         .container {
-            background: white;
-            border-radius: 10px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+            background: var(--bg-card);
+            border-radius: 12px;
+            border-top: 3px solid var(--simkl-teal);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
             padding: 40px;
             max-width: 560px;
             width: 100%;
         }
 
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
+        .simkl-logo { display: block; width: 52px; height: 52px; margin: 0 auto 20px; }
 
-        .header h1 {
-            font-size: 2rem;
-            color: #333;
-            margin-bottom: 10px;
-        }
-
-        .header p {
-            color: #666;
-            font-size: 1rem;
-        }
+        .header { text-align: center; margin-bottom: 28px; }
+        .header h1 { font-size: 1.75rem; font-weight: 700; color: var(--simkl-teal); margin-bottom: 8px; letter-spacing: -0.2px; }
+        .header p { color: var(--text-muted); font-size: 0.95rem; }
 
         .instructions {
-            background: #f0fdf9;
-            border-left: 4px solid #1CE8B5;
-            padding: 15px;
+            background: rgba(28, 232, 181, 0.06);
+            border-left: 4px solid var(--simkl-teal);
+            padding: 14px 16px;
             margin: 20px 0;
-            border-radius: 3px;
+            border-radius: 0 6px 6px 0;
             font-size: 0.9rem;
-            color: #333;
+            line-height: 1.6;
         }
-
-        .instructions ol {
-            margin-left: 20px;
-        }
-
-        .instructions li {
-            margin: 8px 0;
-        }
+        .instructions strong { color: var(--text-primary); }
+        .instructions ol { margin-left: 20px; }
+        .instructions li { margin: 6px 0; color: var(--text-muted); }
 
         .button {
             display: block;
             width: 100%;
-            padding: 14px;
+            padding: 13px;
             border: none;
-            border-radius: 5px;
-            font-size: 1rem;
+            border-radius: 7px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            font-family: inherit;
             cursor: pointer;
             text-align: center;
             text-decoration: none;
-            transition: all 0.3s ease;
+            transition: background 0.2s, box-shadow 0.2s, transform 0.15s;
             margin: 10px 0;
         }
-
         .button.primary {
-            background: #1CE8B5;
-            color: #1a1a2e;
-            font-weight: 600;
+            background: var(--simkl-teal);
+            color: #0a0a13;
         }
-
         .button.primary:hover {
-            background: #17c99c;
+            background: var(--simkl-teal-dark);
+            transform: translateY(-1px);
+            box-shadow: 0 5px 18px var(--simkl-teal-glow);
         }
-
         .button.secondary {
-            background: #f0f0f0;
-            color: #333;
-            border: 1px solid #ddd;
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text-muted);
+            border: 1px solid var(--border-subtle);
         }
-
         .button.secondary:hover {
-            background: #e0e0e0;
+            background: rgba(255, 255, 255, 0.09);
+            color: var(--text-primary);
         }
 
         .status {
-            margin: 20px 0;
-            padding: 15px;
-            border-radius: 5px;
+            margin: 18px 0;
+            padding: 12px 15px;
+            border-radius: 6px;
             text-align: center;
+            font-size: 0.9rem;
+            font-weight: 500;
         }
-
         .status.success {
-            background: #e8f5e9;
-            color: #2e7d32;
-            border: 1px solid #81c784;
+            background: rgba(28, 232, 181, 0.08);
+            color: var(--simkl-teal);
+            border: 1px solid rgba(28, 232, 181, 0.25);
         }
-
         .status.error {
-            background: #ffebee;
-            color: #c62828;
-            border: 1px solid #ef5350;
+            background: rgba(220, 53, 69, 0.1);
+            color: #f07880;
+            border: 1px solid rgba(220, 53, 69, 0.3);
         }
 
-        .result-section {
-            margin-top: 20px;
-        }
+        .result-section { margin-top: 20px; }
+        .result-section h3 { color: var(--text-primary); margin-bottom: 10px; font-size: 1rem; font-weight: 700; }
+        .result-section p { color: var(--text-muted); margin-bottom: 10px; font-size: 0.9rem; }
 
         .config-output {
-            background: #f5f5f5;
-            padding: 15px;
-            border-radius: 5px;
+            background: var(--bg-inset);
+            border: 1px solid var(--border-subtle);
+            padding: 14px 16px;
+            border-radius: 7px;
             margin: 10px 0;
-            font-family: monospace;
-            font-size: 0.85rem;
+            font-family: "Courier New", monospace;
+            font-size: 0.82rem;
+            color: var(--simkl-teal);
             white-space: pre-wrap;
             word-wrap: break-word;
+            line-height: 1.55;
         }
 
         .copy-btn {
-            background: #4caf50;
-            color: white;
-            padding: 10px 20px;
+            background: var(--simkl-teal);
+            color: #0a0a13;
+            padding: 11px 22px;
             border: none;
-            border-radius: 5px;
+            border-radius: 7px;
             cursor: pointer;
-            font-size: 0.9rem;
-            transition: all 0.3s ease;
+            font-size: 0.88rem;
+            font-weight: 700;
+            font-family: inherit;
             width: 100%;
             margin-top: 10px;
+            transition: background 0.2s, box-shadow 0.2s;
         }
-
         .copy-btn:hover {
-            background: #45a049;
+            background: var(--simkl-teal-dark);
+            box-shadow: 0 4px 14px var(--simkl-teal-glow);
         }
 
-        .footer {
-            text-align: center;
-            margin-top: 30px;
-            font-size: 0.85rem;
-            color: #999;
-        }
+        .footer { text-align: center; margin-top: 28px; font-size: 0.82rem; color: var(--text-dim); line-height: 1.8; }
+        .footer a { color: var(--simkl-teal); text-decoration: none; opacity: 0.8; }
+        .footer a:hover { opacity: 1; }
 
-        .footer a {
-            color: #1CE8B5;
-            text-decoration: none;
+        @media (max-width: 600px) {
+            .container { padding: 26px 16px; }
+            .header h1 { font-size: 1.4rem; }
         }
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- Simkl logo: dark rounded square with teal "S" mark -->
+        <svg class="simkl-logo" viewBox="0 0 52 52" xmlns="http://www.w3.org/2000/svg">
+            <rect width="52" height="52" rx="11" fill="#0d0d1a"/>
+            <rect width="52" height="52" rx="11" fill="none" stroke="#1CE8B5" stroke-width="2.5"/>
+            <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
+                  font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif"
+                  font-weight="800" font-size="26" fill="#1CE8B5">S</text>
+        </svg>
+
         <div class="header">
-            <h1>&#127909; SIMKL OAuth</h1>
+            <h1>SIMKL OAuth</h1>
             <p>Get your SIMKL access token for Kometa</p>
         </div>
 
@@ -188,11 +196,11 @@
         </div>
 
         <div class="result-section">
-            <h3 style="color: #333; margin-bottom: 15px;">&#10003; Configuration Ready</h3>
-            <p style="color: #666; margin-bottom: 10px;">Copy and paste this into your Kometa config.yml:</p>
+            <h3>&#10003; Configuration Ready</h3>
+            <p>Copy and paste this into your Kometa config.yml:</p>
             <div class="config-output" id="configOutput">simkl:
   user_token: {{ user_token }}</div>
-            <button class="copy-btn" onclick="copyConfig()">&#128203; Copy Configuration</button>
+            <button class="copy-btn" id="copyBtn" onclick="copyConfig()">Copy Configuration</button>
         </div>
 
         {% elif state == "error" %}
@@ -204,7 +212,7 @@
         {% endif %}
 
         <div class="footer">
-            <p>For use with Kometa</p>
+            <p>For use with <a href="https://kometa.wiki" target="_blank" rel="noopener">Kometa</a></p>
             <p><a href="/">&#8592; Back to Home</a></p>
         </div>
     </div>
@@ -212,10 +220,10 @@
     <script>
         function copyConfig() {
             const configText = document.getElementById('configOutput').textContent;
+            const btn = document.getElementById('copyBtn');
             navigator.clipboard.writeText(configText).then(() => {
-                const btn = document.querySelector('.copy-btn');
-                btn.textContent = '&#10003; Copied!';
-                setTimeout(() => { btn.textContent = '&#128203; Copy Configuration'; }, 3000);
+                btn.textContent = '\u2713 Copied!';
+                setTimeout(() => { btn.textContent = 'Copy Configuration'; }, 3000);
             }).catch(() => {
                 alert('Could not copy to clipboard. Please copy manually.');
             });

@@ -5,15 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>MyAnimeList OAuth - Kometa</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        /* --- MAL brand tokens --- */
+        :root {
+            --mal-blue:        #2E51A2;
+            --mal-blue-dark:   #1A2F6F;
+            --mal-blue-hover:  #253f85;
+            --mal-blue-light:  #eef1fb;
+            --mal-blue-border: #c5cef0;
+            --bg-page-top:     #2E51A2;
+            --bg-page-bot:     #162660;
+            --bg-card:         #ffffff;
+            --bg-inset:        #f5f7fc;
+            --border-color:    #dde2f0;
+            --text-primary:    #1a1a2e;
+            --text-muted:      #555;
+            --text-dim:        #999;
         }
 
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #2E51A2 0%, #1A2F6F 100%);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(160deg, var(--bg-page-top) 0%, var(--bg-page-bot) 100%);
             min-height: 100vh;
             display: flex;
             justify-content: center;
@@ -22,179 +35,158 @@
         }
 
         .container {
-            background: white;
+            background: var(--bg-card);
             border-radius: 10px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            border-top: 3px solid var(--mal-blue);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
             padding: 40px;
             max-width: 600px;
             width: 100%;
         }
 
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-        }
+        .mal-logo { display: block; width: 52px; height: 52px; margin: 0 auto 18px; }
 
-        .header h1 {
-            font-size: 2rem;
-            color: #333;
-            margin-bottom: 10px;
-        }
+        .header { text-align: center; margin-bottom: 28px; }
+        .header h1 { font-size: 1.75rem; font-weight: 700; color: var(--mal-blue); margin-bottom: 8px; letter-spacing: -0.2px; }
+        .header p { color: var(--text-muted); font-size: 0.95rem; }
 
-        .header p {
-            color: #666;
-            font-size: 1rem;
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
+        .form-group { margin-bottom: 18px; }
         .form-group label {
             display: block;
-            margin-bottom: 8px;
-            color: #333;
-            font-weight: 500;
+            margin-bottom: 7px;
+            color: var(--text-primary);
+            font-weight: 600;
+            font-size: 0.9rem;
         }
-
         .form-group input {
             width: 100%;
-            padding: 12px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            font-size: 1rem;
-            transition: border-color 0.3s;
+            padding: 11px 13px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 0.95rem;
+            font-family: inherit;
+            color: var(--text-primary);
+            background: #fff;
+            transition: border-color 0.2s, box-shadow 0.2s;
         }
-
         .form-group input:focus {
             outline: none;
-            border-color: #2E51A2;
+            border-color: var(--mal-blue);
+            box-shadow: 0 0 0 3px rgba(46, 81, 162, 0.12);
         }
+        .form-group input[readonly] { background: var(--bg-inset); color: var(--text-muted); }
+
+        .auth-url-row { display: flex; gap: 10px; }
+        .auth-url-row input { flex: 1; }
 
         .status {
-            margin: 20px 0;
-            padding: 15px;
-            border-radius: 5px;
+            margin: 18px 0;
+            padding: 12px 15px;
+            border-radius: 6px;
             text-align: center;
+            font-size: 0.9rem;
+            font-weight: 500;
             display: none;
         }
-
-        .status.info {
-            background: #e3f2fd;
-            color: #1565c0;
-            border: 1px solid #90caf9;
-        }
-
-        .status.success {
-            background: #e8f5e9;
-            color: #2e7d32;
-            border: 1px solid #81c784;
-        }
-
-        .status.error {
-            background: #ffebee;
-            color: #c62828;
-            border: 1px solid #ef5350;
-        }
+        .status.info    { background: var(--mal-blue-light); color: var(--mal-blue-dark); border: 1px solid var(--mal-blue-border); }
+        .status.success { background: #e8f5e9; color: #2e7d32; border: 1px solid #81c784; }
+        .status.error   { background: #ffebee; color: #c62828; border: 1px solid #ef5350; }
 
         .button {
             width: 100%;
             padding: 12px;
             border: none;
-            border-radius: 5px;
-            font-size: 1rem;
+            border-radius: 7px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            font-family: inherit;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: background 0.2s, box-shadow 0.2s, transform 0.15s;
             margin: 10px 0;
         }
-
-        .button.primary {
-            background: #2E51A2;
-            color: white;
-        }
-
-        .button.primary:hover {
-            background: #1A2F6F;
-        }
-
-        .button.primary:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-        }
-
-        .button.secondary {
-            background: #f0f0f0;
-            color: #333;
-            border: 1px solid #ddd;
-        }
-
-        .button.secondary:hover {
-            background: #e0e0e0;
-        }
+        .button.primary { background: var(--mal-blue); color: #fff; }
+        .button.primary:hover { background: var(--mal-blue-hover); transform: translateY(-1px); box-shadow: 0 4px 14px rgba(46, 81, 162, 0.25); }
+        .button.primary:disabled { background: #b0b8d0; cursor: not-allowed; transform: none; box-shadow: none; }
+        .button.secondary { background: var(--bg-inset); color: var(--text-muted); border: 1px solid var(--border-color); }
+        .button.secondary:hover { background: #e8ecf7; color: var(--text-primary); }
+        .button.narrow { width: auto; padding: 11px 18px; margin: 0; }
 
         .instructions {
-            background: #f0f4ff;
-            border-left: 4px solid #2E51A2;
-            padding: 15px;
+            background: var(--mal-blue-light);
+            border-left: 4px solid var(--mal-blue);
+            padding: 14px 16px;
             margin: 20px 0;
-            border-radius: 3px;
+            border-radius: 0 6px 6px 0;
             font-size: 0.9rem;
-            color: #333;
+            color: var(--text-muted);
+            line-height: 1.6;
         }
+        .instructions strong { color: var(--text-primary); }
+        .instructions ol { margin-left: 20px; }
+        .instructions li { margin: 6px 0; }
 
-        .instructions ol {
-            margin-left: 20px;
-        }
+        .url-hint { font-size: 0.83rem; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
 
-        .instructions li {
-            margin: 8px 0;
-        }
-
-        .result-section {
-            display: none;
-            margin-top: 20px;
-        }
+        .result-section { display: none; margin-top: 20px; }
+        .result-section h3 { color: var(--text-primary); margin-bottom: 12px; font-size: 1rem; font-weight: 700; }
+        .result-section > p { color: var(--text-muted); margin-bottom: 10px; font-size: 0.9rem; }
 
         .config-output {
-            background: #f5f5f5;
-            padding: 15px;
-            border-radius: 5px;
+            background: var(--bg-inset);
+            border: 1px solid var(--border-color);
+            padding: 14px 16px;
+            border-radius: 6px;
             margin: 10px 0;
-            font-family: monospace;
-            font-size: 0.85rem;
+            font-family: "Courier New", monospace;
+            font-size: 0.82rem;
+            color: var(--mal-blue-dark);
             white-space: pre-wrap;
             word-wrap: break-word;
             max-height: 300px;
             overflow-y: auto;
+            line-height: 1.55;
         }
 
         .copy-btn {
-            background: #4caf50;
-            color: white;
-            padding: 10px 20px;
+            background: var(--mal-blue);
+            color: #fff;
+            padding: 11px 22px;
             border: none;
-            border-radius: 5px;
+            border-radius: 7px;
             cursor: pointer;
-            font-size: 0.9rem;
-            transition: all 0.3s ease;
+            font-size: 0.88rem;
+            font-weight: 700;
+            font-family: inherit;
+            width: 100%;
+            margin-top: 10px;
+            transition: background 0.2s, box-shadow 0.2s;
         }
+        .copy-btn:hover { background: var(--mal-blue-hover); box-shadow: 0 4px 12px rgba(46, 81, 162, 0.25); }
 
-        .copy-btn:hover {
-            background: #45a049;
-        }
+        .footer { text-align: center; margin-top: 28px; font-size: 0.82rem; color: var(--text-dim); line-height: 1.8; }
+        .footer a { color: var(--mal-blue); text-decoration: none; }
+        .footer a:hover { text-decoration: underline; }
 
-        .footer {
-            text-align: center;
-            margin-top: 30px;
-            font-size: 0.85rem;
-            color: #999;
+        @media (max-width: 600px) {
+            .container { padding: 26px 16px; }
+            .header h1 { font-size: 1.4rem; }
+            .auth-url-row { flex-direction: column; }
+            .button.narrow { width: 100%; }
         }
     </style>
 </head>
 <body>
     <div class="container">
+        <!-- MAL logo: blue rounded square with white "MAL" text -->
+        <svg class="mal-logo" viewBox="0 0 52 52" xmlns="http://www.w3.org/2000/svg">
+            <rect width="52" height="52" rx="10" fill="#2E51A2"/>
+            <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
+                  font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif"
+                  font-weight="800" font-size="15" fill="#ffffff" letter-spacing="0.5">MAL</text>
+        </svg>
+
         <div class="header">
-            <h1>📚 MyAnimeList OAuth</h1>
+            <h1>MyAnimeList OAuth</h1>
             <p>Get your MAL access token for Kometa</p>
         </div>
 
@@ -207,7 +199,7 @@
                     <li>Enter your MyAnimeList Client ID and Client Secret</li>
                     <li>Click "Get Authorization URL" to generate the auth link</li>
                     <li>Visit the MyAnimeList website and authorize</li>
-                    <li>Copy the localhost URL (it won't load - that's normal!)</li>
+                    <li>Copy the localhost URL (it won't load — that's normal!)</li>
                     <li>Paste it below and submit</li>
                 </ol>
             </div>
@@ -229,16 +221,16 @@
             <div id="authUrlSection" style="display: none;">
                 <div class="form-group">
                     <label>Authorization URL</label>
-                    <div style="display: flex; gap: 10px;">
-                        <input type="text" id="authUrl" readonly style="flex: 1;">
-                        <button class="button secondary" onclick="openAuthUrl()" style="width: auto; padding: 12px 20px;">Open URL</button>
+                    <div class="auth-url-row">
+                        <input type="text" id="authUrl" readonly>
+                        <button class="button secondary narrow" onclick="openAuthUrl()">Open URL</button>
                     </div>
                 </div>
 
                 <div class="form-group">
                     <label for="localhostUrl">Localhost URL (from redirect)</label>
                     <input type="text" id="localhostUrl" placeholder="http://localhost/?code=..." required>
-                    <p style="font-size: 0.85rem; color: #666; margin-top: 5px;">
+                    <p class="url-hint">
                         After authorizing, you'll be redirected to a localhost URL that won't load. Copy the entire URL and paste it here.
                     </p>
                 </div>
@@ -248,16 +240,16 @@
         </div>
 
         <div id="resultSection" class="result-section">
-            <h3 style="color: #333; margin-bottom: 15px;">✅ Configuration Ready</h3>
-            <p style="color: #666; margin-bottom: 10px;">Copy and paste this into your Kometa config.yml:</p>
+            <h3>&#10003; Configuration Ready</h3>
+            <p>Copy and paste this into your Kometa config.yml:</p>
             <div class="config-output" id="configOutput"></div>
-            <button class="copy-btn" onclick="copyConfig()">📋 Copy Configuration</button>
-            <button class="button secondary" onclick="resetForm()" style="margin-top: 15px;">Get Another Token</button>
+            <button class="copy-btn" id="copyBtn" onclick="copyConfig()">Copy Configuration</button>
+            <button class="button secondary" onclick="resetForm()">Get Another Token</button>
         </div>
 
         <div class="footer">
-            <p>For use with Kometa</p>
-            <p><a href="/" style="color: #2E51A2; text-decoration: none;">← Back to Home</a></p>
+            <p>For use with <a href="https://kometa.wiki" target="_blank" rel="noopener">Kometa</a></p>
+            <p><a href="/">&#8592; Back to Home</a></p>
         </div>
     </div>
 
@@ -361,9 +353,14 @@
 
         function copyConfig() {
             const configText = document.getElementById('configOutput').textContent;
+            const btn = document.getElementById('copyBtn');
             navigator.clipboard.writeText(configText).then(() => {
-                showStatus('✓ Configuration copied to clipboard!', 'success');
-                setTimeout(hideStatus, 3000);
+                btn.textContent = '\u2713 Copied!';
+                showStatus('\u2713 Configuration copied to clipboard!', 'success');
+                setTimeout(() => {
+                    btn.textContent = 'Copy Configuration';
+                    hideStatus();
+                }, 3000);
             }).catch(() => {
                 showStatus('Error copying configuration', 'error');
             });
