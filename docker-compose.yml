@@ -116,7 +116,7 @@ services:
       fider-db:
         condition: service_healthy
 
-  comparison-app:
+  image-compare:
     build: .
     ports:
       - "8000:8000"
