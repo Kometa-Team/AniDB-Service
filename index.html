@@ -71,8 +71,13 @@
             box-shadow: 0 10px 30px rgba(0,0,0,0.2);
         }
         .service-icon {
-            font-size: 3rem;
-            margin-bottom: 15px;
+            width: 56px;
+            height: 56px;
+            margin: 0 auto 15px;
+        }
+        .service-icon svg {
+            width: 56px;
+            height: 56px;
         }
         .service-title {
             font-size: 1.3rem;
@@ -95,44 +100,95 @@
 </head>
 <body>
     <div class="container">
-        <h1>🎬 Kometa Services</h1>
-        <p class="subtitle">Authentication & Metadata Services</p>
+        <h1>Kometa Services</h1>
+        <p class="subtitle">Authentication &amp; Metadata Services</p>
 
         <div class="services">
             <a href="/plex-oauth" class="service-card">
-                <div class="service-icon">📺</div>
+                <div class="service-icon">
+                    <!-- Plex: orange rounded square + dark play arrow -->
+                    <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-label="Plex">
+                        <rect width="48" height="48" rx="10" fill="#E5A00D"/>
+                        <path d="M19 12 L37 24 L19 36 Z" fill="#141414"/>
+                    </svg>
+                </div>
                 <div class="service-title">Plex OAuth</div>
                 <div class="service-desc">Authenticate with Plex Media Server</div>
             </a>
 
             <a href="/trakt-oauth" class="service-card">
-                <div class="service-icon">🎬</div>
+                <div class="service-icon">
+                    <!-- Trakt: red rounded square + bold white "t" -->
+                    <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-label="Trakt">
+                        <rect width="48" height="48" rx="10" fill="#ED1C24"/>
+                        <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
+                              font-family="Arial, sans-serif" font-weight="700" font-size="28"
+                              fill="#ffffff">t</text>
+                    </svg>
+                </div>
                 <div class="service-title">Trakt OAuth</div>
                 <div class="service-desc">Get your Trakt access token</div>
             </a>
 
             <a href="/mal-oauth" class="service-card">
-                <div class="service-icon">🎯</div>
+                <div class="service-icon">
+                    <!-- MAL: blue rounded square + white "MAL" text -->
+                    <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-label="MyAnimeList">
+                        <rect width="48" height="48" rx="10" fill="#2E51A2"/>
+                        <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
+                              font-family="Arial, sans-serif" font-weight="800" font-size="14"
+                              fill="#ffffff" letter-spacing="0.5">MAL</text>
+                    </svg>
+                </div>
                 <div class="service-title">MAL OAuth</div>
                 <div class="service-desc">Connect your MyAnimeList account</div>
             </a>
 
             <a href="/anidb-service" class="service-card">
-                <div class="service-icon">📊</div>
+                <div class="service-icon">
+                    <!-- AniDB: dark navy square + blue-white "ADB" text -->
+                    <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-label="AniDB">
+                        <rect width="48" height="48" rx="10" fill="#1a1f35"/>
+                        <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
+                              font-family="Arial, sans-serif" font-weight="800" font-size="13"
+                              fill="#7ba7d4" letter-spacing="0.5">ADB</text>
+                    </svg>
+                </div>
                 <div class="service-title">AniDB Service</div>
-                <div class="service-desc">Cached anime metadata & API</div>
+                <div class="service-desc">Cached anime metadata &amp; API</div>
             </a>
 
             <a href="/simkl-oauth" class="service-card">
-                <div class="service-icon">📡</div>
+                <div class="service-icon">
+                    <!-- SIMKL: dark square with teal border + teal "S" -->
+                    <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-label="SIMKL">
+                        <rect width="48" height="48" rx="10" fill="#0d0d1a"/>
+                        <rect width="48" height="48" rx="10" fill="none" stroke="#1CE8B5" stroke-width="2.5"/>
+                        <text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle"
+                              font-family="Arial, sans-serif" font-weight="800" font-size="24"
+                              fill="#1CE8B5">S</text>
+                    </svg>
+                </div>
                 <div class="service-title">SIMKL OAuth</div>
                 <div class="service-desc">Connect your SIMKL account</div>
             </a>
 
             <a href="/simkl-service" class="service-card">
-                <div class="service-icon">🌐</div>
+                <div class="service-icon">
+                    <!-- SIMKL Service: same brand mark as SIMKL OAuth -->
+                    <svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-label="SIMKL Service">
+                        <rect width="48" height="48" rx="10" fill="#0d0d1a"/>
+                        <rect width="48" height="48" rx="10" fill="none" stroke="#1CE8B5" stroke-width="2.5"/>
+                        <text x="50%" y="38%" dominant-baseline="middle" text-anchor="middle"
+                              font-family="Arial, sans-serif" font-weight="800" font-size="13"
+                              fill="#1CE8B5" letter-spacing="0.5">SIMKL</text>
+                        <text x="50%" y="66%" dominant-baseline="middle" text-anchor="middle"
+                              font-family="Arial, sans-serif" font-weight="700" font-size="10"
+                              fill="#1CE8B5" letter-spacing="0.5">SERVICE</text>
+                    </svg>
+                </div>
                 <div class="service-title">SIMKL Service</div>
-                <div class="service-desc">Cached SIMKL trending & metadata</div>
+                <div class="service-desc">Cached SIMKL trending &amp; metadata</div>
             </a>
         </div>
 
