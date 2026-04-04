@@ -4,11 +4,12 @@ import asyncio
 import gzip
 import json
 import os
+import shutil
 import sqlite3
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import httpx
 
@@ -88,6 +89,16 @@ CREATE INDEX IF NOT EXISTS idx_nb_name ON name_basics(primaryName);
 CREATE TABLE IF NOT EXISTS import_meta (
     key TEXT PRIMARY KEY,
     value TEXT
+);
+
+CREATE TABLE IF NOT EXISTS imdb_parental (
+    imdb_id TEXT PRIMARY KEY,
+    nudity TEXT,
+    violence TEXT,
+    profanity TEXT,
+    alcohol TEXT,
+    frightening TEXT,
+    updated_at TEXT
 );
 """
 
@@ -207,6 +218,17 @@ def import_table(
 
 
 IMDB_BASE_URL = "https://datasets.imdbws.com"
+DATASET_MANIFEST = "dataset_manifest.json"
+
+DATASET_REFRESH_DAYS: dict[str, int] = {
+    "title.ratings": 1,
+    "title.basics": 2,
+    "title.episode": 2,
+    "title.akas": 7,
+    "title.crew": 7,
+    "title.principals": 7,
+    "name.basics": 7,
+}
 
 DATASET_FILES: dict[str, str] = {
     "title.basics": "title.basics.tsv.gz",
@@ -217,6 +239,72 @@ DATASET_FILES: dict[str, str] = {
     "title.principals": "title.principals.tsv.gz",
     "name.basics": "name.basics.tsv.gz",
 }
+
+
+def _load_manifest(data_dir: Path) -> dict[str, Any]:
+    manifest_path = data_dir / DATASET_MANIFEST
+    if not manifest_path.exists():
+        return {}
+    try:
+        loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(loaded, dict):
+        return {}
+    return {str(k): v for k, v in loaded.items()}
+
+
+def _save_manifest(data_dir: Path, manifest: dict[str, Any]) -> None:
+    (data_dir / DATASET_MANIFEST).write_text(
+        json.dumps(manifest, indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def _dataset_due(manifest: dict[str, Any], stem: str) -> bool:
+    entry = manifest.get(stem)
+    if not entry or not entry.get("last_checked"):
+        return True
+    refresh_days = DATASET_REFRESH_DAYS.get(stem, 1)
+    try:
+        last_checked = datetime.fromisoformat(entry["last_checked"])
+    except ValueError:
+        return True
+    if last_checked.tzinfo is None:
+        last_checked = last_checked.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - last_checked >= timedelta(days=refresh_days)
+
+
+def _metadata_changed(previous: Optional[dict[str, Any]], current: dict[str, Any]) -> bool:
+    if not previous:
+        return True
+    for key in ("etag", "last_modified", "content_length"):
+        if (previous.get(key) or None) != (current.get(key) or None):
+            return True
+    return False
+
+
+async def _fetch_remote_metadata(
+    client: httpx.AsyncClient, filename: str
+) -> dict[str, Optional[str]]:
+    url = f"{IMDB_BASE_URL}/{filename}"
+    response = await client.head(url, timeout=120.0)
+    if response.status_code == 405:
+        async with client.stream("GET", url, timeout=120.0) as get_response:
+            get_response.raise_for_status()
+            headers = get_response.headers
+            return {
+                "etag": headers.get("etag"),
+                "last_modified": headers.get("last-modified"),
+                "content_length": headers.get("content-length"),
+            }
+    response.raise_for_status()
+    headers = response.headers
+    return {
+        "etag": headers.get("etag"),
+        "last_modified": headers.get("last-modified"),
+        "content_length": headers.get("content-length"),
+    }
 
 
 def _gzip_is_complete(path: Path) -> bool:
@@ -234,19 +322,36 @@ def _gzip_is_complete(path: Path) -> bool:
 
 async def _download_one(
     client: httpx.AsyncClient,
+    stem: str,
     filename: str,
     dest: Path,
+    manifest: dict[str, Any],
     on_start: Optional[Callable[[str], None]] = None,
     on_done: Optional[Callable[[str], None]] = None,
-) -> None:
-    """Stream a single dataset file to disk, skipping if already complete."""
-    if await asyncio.to_thread(_gzip_is_complete, dest):
-        print(f"⏭️  Skipping {filename} (already complete)")
-        if on_start:
-            on_start(filename)
-        if on_done:
-            on_done(filename)
-        return
+) -> tuple[bool, dict[str, Any]]:
+    """Refresh a single dataset file if metadata changed or the local gzip is incomplete."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    previous = manifest.get(stem, {})
+    file_complete = await asyncio.to_thread(_gzip_is_complete, dest)
+    if file_complete and not _dataset_due(manifest, stem):
+        print(f"⏭️  Skipping {filename} (not due for refresh)")
+        updated = {
+            **previous,
+            "last_checked": previous.get("last_checked", now_iso),
+        }
+        return False, updated
+
+    remote_metadata = await _fetch_remote_metadata(client, filename)
+    metadata_changed = _metadata_changed(previous, remote_metadata)
+    if file_complete and not metadata_changed:
+        print(f"⏭️  Skipping {filename} (remote metadata unchanged)")
+        updated = {
+            **previous,
+            **remote_metadata,
+            "last_checked": now_iso,
+        }
+        return False, updated
+
     url = f"{IMDB_BASE_URL}/{filename}"
     if on_start:
         on_start(filename)
@@ -259,29 +364,47 @@ async def _download_one(
     print(f"✅ Downloaded {filename}")
     if on_done:
         on_done(filename)
+    return True, {
+        **remote_metadata,
+        "last_checked": now_iso,
+        "last_downloaded": now_iso,
+    }
 
 
 async def download_datasets(
     data_dir: Path,
     on_file_start: Optional[Callable[[str], None]] = None,
     on_file_done: Optional[Callable[[str], None]] = None,
-) -> dict[str, Path]:
+) -> tuple[dict[str, Path], list[str]]:
     """
     Download all 7 IMDB dataset files concurrently to data_dir.
 
-    Returns a dict mapping stem → local Path.
+    Returns a tuple of:
+      - dict mapping stem → local Path
+      - list of stems whose local files changed this run
     """
     data_dir.mkdir(parents=True, exist_ok=True)
     paths: dict[str, Path] = {stem: data_dir / filename for stem, filename in DATASET_FILES.items()}
+    manifest = _load_manifest(data_dir)
 
     async with httpx.AsyncClient(timeout=600.0) as client:
         tasks = [
-            _download_one(client, filename, paths[stem], on_file_start, on_file_done)
+            _download_one(
+                client, stem, filename, paths[stem], manifest, on_file_start, on_file_done
+            )
             for stem, filename in DATASET_FILES.items()
         ]
-        await asyncio.gather(*tasks)
+        results = await asyncio.gather(*tasks)
 
-    return paths
+    changed_stems: list[str] = []
+    for stem, (changed, updated_manifest) in zip(DATASET_FILES.keys(), results):
+        manifest[stem] = updated_manifest
+        if changed:
+            changed_stems.append(stem)
+
+    _save_manifest(data_dir, manifest)
+
+    return paths, changed_stems
 
 
 # Maps dataset stem → table name
@@ -332,10 +455,20 @@ TABLE_COLUMNS: dict[str, list[str]] = {
     ],
 }
 
+ALLOWED_TABLES = frozenset(TABLE_COLUMNS)
+
+
+def _delete_table(conn: sqlite3.Connection, table: str) -> None:
+    """Delete all rows from a validated internal table name."""
+    if table not in ALLOWED_TABLES:
+        raise ValueError(f"Unexpected table: {table}")
+    conn.execute(f"DELETE FROM {table}")  # nosec B608 - table name validated against ALLOWED_TABLES
+
 
 def run_full_import(
     gz_paths: dict[str, Path],
     live_db: Path,
+    changed_stems: Optional[list[str]] = None,
     min_rows_override: Optional[int] = None,
     on_table_start: Optional[Callable[[str], None]] = None,
     on_table_done: Optional[Callable[[str, int], None]] = None,
@@ -349,6 +482,8 @@ def run_full_import(
     min_rows_override: if set, use this as min_rows for all tables (0 = no check; for tests)
     """
     shadow_db = live_db.parent / "imdb_shadow.db"
+    import_stems = changed_stems if changed_stems is not None else list(gz_paths.keys())
+    full_refresh = not live_db.exists()
 
     # Clean up any leftover shadow from a previous failed run
     if shadow_db.exists():
@@ -356,14 +491,31 @@ def run_full_import(
 
     conn = None
     try:
+        if live_db.exists():
+            shutil.copy2(live_db, shadow_db)
         conn = sqlite3.connect(shadow_db)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         create_schema(conn)
         conn.commit()
 
-        row_counts: dict[str, int] = {}
-        for stem, gz_path in gz_paths.items():
+        existing_counts: dict[str, int] = {}
+        cursor = conn.execute("SELECT value FROM import_meta WHERE key = 'row_counts'")
+        row = cursor.fetchone()
+        if row and row[0]:
+            try:
+                existing_counts = json.loads(row[0])
+            except json.JSONDecodeError:
+                existing_counts = {}
+
+        if full_refresh:
+            for table in TABLE_COLUMNS:
+                _delete_table(conn, table)
+            conn.commit()
+
+        row_counts: dict[str, int] = existing_counts.copy()
+        for stem in import_stems:
+            gz_path = gz_paths[stem]
             table = STEM_TO_TABLE.get(stem)
             if table is None:
                 print(f"Unknown stem {stem!r}, skipping")
@@ -375,6 +527,8 @@ def run_full_import(
             print(f"Importing {stem} -> {table}...")
             if on_table_start:
                 on_table_start(table)
+            _delete_table(conn, table)
+            conn.commit()
             _t, _cb = table, on_table_progress
             _progress_cb = (lambda t, cb: lambda n: cb(t, n))(_t, _cb) if _cb else None
             count = import_table(conn, gz_path, table, columns, min_rows, _progress_cb)

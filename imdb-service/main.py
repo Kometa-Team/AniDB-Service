@@ -5,11 +5,14 @@ import json
 import os
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
+from html import unescape
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 import aiosqlite
 import charts
+import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
@@ -19,6 +22,8 @@ DB_PATH = DATA_DIR / "imdb.db"
 ROOT_PATH = os.getenv("ROOT_PATH", "")
 REFRESH_HOUR = int(os.getenv("REFRESH_HOUR", "3"))
 MIN_VOTES_CHART = int(os.getenv("MIN_VOTES_CHART", "25000"))
+PARENTAL_GUIDE_TTL_DAYS = int(os.getenv("PARENTAL_GUIDE_TTL_DAYS", "30"))
+IMDB_WEB_BASE_URL = "https://www.imdb.com"
 
 # --- Global state ---
 last_refresh: Optional[str] = None  # ISO 8601 UTC string
@@ -104,13 +109,17 @@ async def _run_import_pipeline() -> None:
                 download_progress[stem] = "done"
                 break
 
-    gz_paths = await download_datasets(DATA_DIR, _on_file_start, _on_file_done)
+    gz_paths, changed_stems = await download_datasets(DATA_DIR, _on_file_start, _on_file_done)
+    if not changed_stems and DB_PATH.exists():
+        _set_phase("idle")
+        print("✅ Refresh skipped: no dataset changes detected")
+        return
 
     # --- Import phase ---
     _set_phase("importing")
     import_progress = {
         STEM_TO_TABLE[stem]: {"status": "pending", "rows": 0}
-        for stem in gz_paths
+        for stem in changed_stems
         if stem in STEM_TO_TABLE
     }
 
@@ -127,6 +136,7 @@ async def _run_import_pipeline() -> None:
         run_full_import,
         gz_paths,
         DB_PATH,
+        changed_stems,
         None,
         _on_table_start,
         _on_table_done,
@@ -193,6 +203,27 @@ SORT_COLUMN_MAP: Dict[str, str] = {
     "title": "tb.primaryTitle",
 }
 
+EXTRACT_FIELD_SELECTS: Dict[str, str] = {
+    "ratings": "tb.tconst, tb.primaryTitle, tb.titleType, tr.averageRating, tr.numVotes",
+    "genres": "tb.tconst, tb.primaryTitle, tb.titleType, tb.genres",
+}
+
+PARENTAL_TYPE_MAP: Dict[str, str] = {
+    "Sex & Nudity": "Nudity",
+    "Violence & Gore": "Violence",
+    "Profanity": "Profanity",
+    "Alcohol, Drugs & Smoking": "Alcohol",
+    "Frightening & Intense Scenes": "Frightening",
+}
+
+PARENTAL_DB_COLUMNS: Dict[str, str] = {
+    "Nudity": "nudity",
+    "Violence": "violence",
+    "Profanity": "profanity",
+    "Alcohol": "alcohol",
+    "Frightening": "frightening",
+}
+
 
 def _parse_sort(sort_by: str) -> tuple[str, str]:
     """Parse 'rating.desc' → ('tr.averageRating', 'DESC'). Raises ValueError on invalid input."""
@@ -204,6 +235,176 @@ def _parse_sort(sort_by: str) -> tuple[str, str]:
     if direction not in ("ASC", "DESC"):
         raise ValueError(f"Invalid sort direction: {direction!r}")
     return SORT_COLUMN_MAP[col_key], direction
+
+
+def _normalize_extract_row(field: str, row: aiosqlite.Row) -> Dict[str, Any]:
+    """Convert a raw extraction row into the endpoint response shape."""
+    result: Dict[str, Any] = {
+        "tconst": row["tconst"],
+        "primaryTitle": row["primaryTitle"],
+        "titleType": row["titleType"],
+    }
+
+    if field == "ratings":
+        result["averageRating"] = row["averageRating"]
+        result["numVotes"] = row["numVotes"]
+    else:
+        result["genres"] = row["genres"].split(",") if row["genres"] else []
+
+    return result
+
+
+class _ParentalGuideParser(HTMLParser):
+    """Extract IMDb parental guide severity labels from the page HTML."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.results: Dict[str, str] = {}
+        self._in_target_li = False
+        self._li_depth = 0
+        self._in_anchor = False
+        self._anchor_text: list[str] = []
+        self._other_text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
+        attrs_dict = dict(attrs)
+        class_name = attrs_dict.get("class") or ""
+        if tag == "li" and "ipc-metadata-list-item--link" in class_name and not self._in_target_li:
+            self._in_target_li = True
+            self._li_depth = 1
+            self._anchor_text = []
+            self._other_text = []
+            return
+        if self._in_target_li:
+            if tag == "li":
+                self._li_depth += 1
+            elif tag == "a":
+                self._in_anchor = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self._in_target_li:
+            return
+        if tag == "a":
+            self._in_anchor = False
+        elif tag == "li":
+            self._li_depth -= 1
+            if self._li_depth == 0:
+                category = "".join(self._anchor_text).strip().rstrip(":")
+                severity = next(
+                    (text for text in self._other_text if text and text != category), None
+                )
+                if category in PARENTAL_TYPE_MAP and severity:
+                    self.results[PARENTAL_TYPE_MAP[category]] = severity
+                self._in_target_li = False
+
+    def handle_data(self, data: str) -> None:
+        if not self._in_target_li:
+            return
+        text = unescape(data).strip()
+        if not text:
+            return
+        if self._in_anchor:
+            self._anchor_text.append(text)
+        else:
+            self._other_text.append(text)
+
+
+def _normalize_parental_payload(values: Dict[str, Optional[str]]) -> Dict[str, str]:
+    """Fill missing parental categories with 'None' to match Kometa cache reads."""
+    return {category: values.get(category) or "None" for category in PARENTAL_TYPE_MAP.values()}
+
+
+def _parse_parental_guide_html(html_text: str) -> Dict[str, str]:
+    """Parse IMDb parental-guide HTML into Kometa-compatible category labels."""
+    parser = _ParentalGuideParser()
+    parser.feed(html_text)
+    parsed = _normalize_parental_payload(parser.results)
+    if all(value == "None" for value in parsed.values()):
+        raise HTTPException(status_code=404, detail="No parental guide found")
+    return parsed
+
+
+async def _fetch_parental_guide_html(imdb_id: str) -> str:
+    """Fetch the IMDb parental guide page for a title."""
+    url = f"{IMDB_WEB_BASE_URL}/title/{imdb_id}/parentalguide"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; Kometa-Utilities/IMDb-Service)",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True, timeout=30.0, headers=headers
+        ) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            return response.text
+    except httpx.HTTPStatusError as e:
+        status_code = 404 if e.response.status_code == 404 else 502
+        raise HTTPException(
+            status_code=status_code,
+            detail=f"IMDb parental guide request failed with status {e.response.status_code}",
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"IMDb parental guide request failed: {e}")
+
+
+async def _query_parental_cache(imdb_id: str) -> tuple[Optional[Dict[str, str]], Optional[bool]]:
+    """Read cached parental-guide data and indicate whether it is expired."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM imdb_parental WHERE imdb_id = ?", (imdb_id,))
+        row = await cursor.fetchone()
+        if not row:
+            return None, None
+        updated_at = row["updated_at"]
+        expired = True
+        if updated_at:
+            updated_dt = datetime.fromisoformat(updated_at)
+            if updated_dt.tzinfo is None:
+                updated_dt = updated_dt.replace(tzinfo=timezone.utc)
+            expired = datetime.now(timezone.utc) - updated_dt > timedelta(
+                days=PARENTAL_GUIDE_TTL_DAYS
+            )
+        return (
+            _normalize_parental_payload(
+                {
+                    "Nudity": row["nudity"],
+                    "Violence": row["violence"],
+                    "Profanity": row["profanity"],
+                    "Alcohol": row["alcohol"],
+                    "Frightening": row["frightening"],
+                }
+            ),
+            expired,
+        )
+
+
+async def _update_parental_cache(imdb_id: str, parental: Dict[str, str]) -> None:
+    """Upsert cached parental-guide data for a title."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO imdb_parental(imdb_id, nudity, violence, profanity, alcohol, frightening, updated_at)
+            VALUES(?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(imdb_id) DO UPDATE SET
+                nudity = excluded.nudity,
+                violence = excluded.violence,
+                profanity = excluded.profanity,
+                alcohol = excluded.alcohol,
+                frightening = excluded.frightening,
+                updated_at = excluded.updated_at
+            """,
+            (
+                imdb_id,
+                parental["Nudity"],
+                parental["Violence"],
+                parental["Profanity"],
+                parental["Alcohol"],
+                parental["Frightening"],
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        await db.commit()
 
 
 @app.get("/search")
@@ -558,6 +759,21 @@ async def root(request: Request) -> HTMLResponse:
         <code>curl "{base}/search?type=movie&amp;rating.gte=8&amp;limit=10"</code>
     </div>
 
+    <div class="endpoint">
+        <strong>GET /ratings/{{imdb_id}}</strong> - Return rating metadata for a title<br>
+        <code>curl "{base}/ratings/tt0111161"</code>
+    </div>
+
+    <div class="endpoint">
+        <strong>GET /genre/{{imdb_id}}</strong> - Return genres for a title<br>
+        <code>curl "{base}/genre/tt0111161"</code>
+    </div>
+
+    <div class="endpoint">
+        <strong>GET /parental/{{imdb_id}}</strong> - Cached IMDb parental guide severities<br>
+        <code>curl "{base}/parental/tt0111161"</code>
+    </div>
+
     <h2>API Documentation</h2>
 
     <div class="endpoint">
@@ -608,6 +824,93 @@ async def get_stats() -> Dict[str, Any]:
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/ratings/{imdb_id}")
+async def get_ratings(imdb_id: str) -> Dict[str, Any]:
+    """Return the IMDb rating metadata for a single title."""
+    if not _db_is_ready():
+        raise HTTPException(status_code=503, detail="Service initializing")
+
+    field = "ratings"
+    select_clause = EXTRACT_FIELD_SELECTS[field]
+    sql = (
+        f"SELECT {select_clause} "  # nosec B608 - field is validated against fixed maps
+        f"FROM title_basics tb "
+        f"LEFT JOIN title_ratings tr ON tb.tconst = tr.tconst "
+        f"WHERE tb.tconst = ?"
+    )
+
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(sql, (imdb_id,))
+            row = await cursor.fetchone()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ratings error: {e}")
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Title {imdb_id!r} not found")
+
+    result = _normalize_extract_row(field, row)
+    return {
+        "field": field,
+        "imdb_id": imdb_id,
+        "result": result,
+    }
+
+
+@app.get("/genre/{imdb_id}")
+async def get_genres(imdb_id: str) -> Dict[str, Any]:
+    """Return the IMDb genres for a single title."""
+    if not _db_is_ready():
+        raise HTTPException(status_code=503, detail="Service initializing")
+
+    field = "genres"
+    select_clause = EXTRACT_FIELD_SELECTS[field]
+    sql = (
+        f"SELECT {select_clause} "  # nosec B608 - field is validated against fixed maps
+        f"FROM title_basics tb "
+        f"LEFT JOIN title_ratings tr ON tb.tconst = tr.tconst "
+        f"WHERE tb.tconst = ?"
+    )
+
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            cursor = await db.execute(sql, (imdb_id,))
+            row = await cursor.fetchone()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Genre error: {e}")
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Title {imdb_id!r} not found")
+
+    result = _normalize_extract_row(field, row)
+    return {
+        "field": field,
+        "imdb_id": imdb_id,
+        "result": result,
+    }
+
+
+@app.get("/parental/{imdb_id}")
+async def get_parental_guide(
+    imdb_id: str,
+    ignore_cache: bool = False,
+) -> Dict[str, Any]:
+    """Return cached IMDb parental-guide labels for a title, refreshing when stale."""
+    if not _db_is_ready():
+        raise HTTPException(status_code=503, detail="Service initializing")
+
+    cached, expired = (None, None) if ignore_cache else await _query_parental_cache(imdb_id)
+    if cached and expired is False:
+        return {"imdb_id": imdb_id, "cached": True, "parental_guide": cached}
+
+    html_text = await _fetch_parental_guide_html(imdb_id)
+    parental = _parse_parental_guide_html(html_text)
+    await _update_parental_cache(imdb_id, parental)
+    return {"imdb_id": imdb_id, "cached": False, "parental_guide": parental}
 
 
 @app.get("/title/{imdb_id}")
