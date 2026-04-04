@@ -3,6 +3,7 @@
 import asyncio
 import gzip
 import io
+import json
 import sqlite3
 import tempfile
 from pathlib import Path
@@ -33,6 +34,7 @@ def test_create_schema_creates_all_tables():
         cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         tables = {row[0] for row in cursor.fetchall()}
         assert tables == {
+            "imdb_parental",
             "title_basics",
             "title_ratings",
             "title_akas",
@@ -167,15 +169,23 @@ async def test_download_datasets_creates_files(tmp_path):
 
     mock_client = AsyncMock()
     mock_client.stream = MagicMock(return_value=mock_stream_ctx)
+    mock_head_resp = MagicMock()
+    mock_head_resp.status_code = 200
+    mock_head_resp.raise_for_status = MagicMock()
+    mock_head_resp.headers = {
+        "etag": '"abc"',
+        "last-modified": "Fri, 04 Apr 2026 00:00:00 GMT",
+        "content-length": "8",
+    }
+    mock_client.head = AsyncMock(return_value=mock_head_resp)
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=False)
 
     with patch("importer.httpx.AsyncClient", return_value=mock_client):
         from importer import download_datasets
 
-        result = await download_datasets(tmp_path)
+        result, changed_stems = await download_datasets(tmp_path)
 
-    assert len(result) == 7
     expected_stems = {
         "title.basics",
         "title.ratings",
@@ -185,10 +195,53 @@ async def test_download_datasets_creates_files(tmp_path):
         "title.principals",
         "name.basics",
     }
+    assert len(result) == 7
+    assert set(changed_stems) == expected_stems
     assert set(result.keys()) == expected_stems
     for _stem, path in result.items():
         assert path.exists()
         assert path.name.endswith(".tsv.gz")
+
+
+@pytest.mark.asyncio
+async def test_download_datasets_skips_unchanged_files(tmp_path):
+    """download_datasets should skip redownloading files whose remote metadata is unchanged."""
+    from importer import DATASET_FILES, download_datasets
+
+    for _stem, filename in DATASET_FILES.items():
+        (tmp_path / filename).write_bytes(_make_tsv_gz("col", []))
+
+    manifest = {
+        stem: {
+            "etag": '"same"',
+            "last_modified": "Fri, 04 Apr 2026 00:00:00 GMT",
+            "content_length": "26",
+            "last_checked": "2026-03-20T00:00:00+00:00",
+            "last_downloaded": "2026-03-20T00:00:00+00:00",
+        }
+        for stem in DATASET_FILES
+    }
+    (tmp_path / "dataset_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    mock_client = AsyncMock()
+    mock_head_resp = MagicMock()
+    mock_head_resp.status_code = 200
+    mock_head_resp.raise_for_status = MagicMock()
+    mock_head_resp.headers = {
+        "etag": '"same"',
+        "last-modified": "Fri, 04 Apr 2026 00:00:00 GMT",
+        "content-length": "26",
+    }
+    mock_client.head = AsyncMock(return_value=mock_head_resp)
+    mock_client.stream = MagicMock(side_effect=AssertionError("download should not occur"))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("importer.httpx.AsyncClient", return_value=mock_client):
+        result, changed_stems = await download_datasets(tmp_path)
+
+    assert len(result) == 7
+    assert changed_stems == []
 
 
 def _make_all_gz_files(tmp_path):
@@ -257,6 +310,41 @@ def test_run_full_import_produces_populated_db(tmp_path):
     row = conn.execute("SELECT value FROM import_meta WHERE key='last_refresh'").fetchone()
     assert row is not None
     conn.close()
+
+
+def test_run_full_import_updates_only_changed_tables(tmp_path):
+    gz_paths = _make_all_gz_files(tmp_path)
+    live_db = tmp_path / "imdb.db"
+
+    from importer import run_full_import
+
+    run_full_import(gz_paths, live_db, min_rows_override=0)
+
+    updated_ratings = _make_tsv_gz(
+        "tconst\taverageRating\tnumVotes",
+        [
+            "tt0000001\t9.9\t999999",
+            "tt0000002\t8.2\t111111",
+            "tt0000003\t7.1\t222222",
+            "tt0000004\t6.0\t333333",
+            "tt0000005\t5.0\t444444",
+        ],
+    )
+    ratings_path = tmp_path / "gz" / "title.ratings.tsv.gz"
+    ratings_path.write_bytes(updated_ratings)
+    run_full_import(gz_paths, live_db, changed_stems=["title.ratings"], min_rows_override=0)
+
+    conn = sqlite3.connect(live_db)
+    rating_row = conn.execute(
+        "SELECT averageRating, numVotes FROM title_ratings WHERE tconst = 'tt0000001'"
+    ).fetchone()
+    basics_row = conn.execute(
+        "SELECT primaryTitle, genres FROM title_basics WHERE tconst = 'tt0000001'"
+    ).fetchone()
+    conn.close()
+
+    assert rating_row == (9.9, 999999)
+    assert basics_row == ("Title 1", "Action")
 
 
 def test_run_full_import_leaves_live_db_on_failure(tmp_path):
@@ -526,13 +614,21 @@ def _seed_full_test_db(db_path):
 
     create_schema(conn)
     conn.execute(
-        "INSERT INTO title_basics VALUES ('tt0111161','movie','The Shawshank Redemption','The Shawshank Redemption',0,1994,NULL,142,'Drama')"
+        "INSERT INTO title_basics VALUES ('tt0111161','movie','The Shawshank Redemption','The Shawshank Redemption',0,1994,NULL,142,'Drama,Crime,Thriller')"
     )
     conn.execute(
-        "INSERT INTO title_basics VALUES ('tt0096697','tvSeries','The Simpsons','The Simpsons',0,1989,NULL,22,'Animation,Comedy')"
+        "INSERT INTO title_basics VALUES ('tt0096697','tvSeries','The Simpsons','The Simpsons',0,1989,NULL,22,'Animation,Comedy,Family')"
+    )
+    conn.execute(
+        "INSERT INTO title_basics VALUES ('tt0502973','tvEpisode','Simpsons Roasting on an Open Fire','Simpsons Roasting on an Open Fire',0,1989,NULL,23,'Animation,Comedy,Family')"
+    )
+    conn.execute(
+        "INSERT INTO title_basics VALUES ('tt9000001','movie','Adult Example','Adult Example',1,1999,NULL,95,'Drama,Thriller,Romance')"
     )
     conn.execute("INSERT INTO title_ratings VALUES ('tt0111161', 9.3, 2800000)")
     conn.execute("INSERT INTO title_ratings VALUES ('tt0096697', 8.0, 500000)")
+    conn.execute("INSERT INTO title_ratings VALUES ('tt0502973', 8.2, 12000)")
+    conn.execute("INSERT INTO title_ratings VALUES ('tt9000001', 4.4, 800)")
     conn.execute("INSERT INTO title_crew VALUES ('tt0111161','nm0001104',NULL)")
     conn.execute(
         "INSERT INTO title_principals VALUES ('tt0111161',1,'nm0000209','actor',NULL,'[\"Andy Dufresne\"]')"
@@ -645,6 +741,255 @@ def test_get_person_returns_503_when_no_db(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "DB_PATH", tmp_path / "nonexistent.db")
     client = TestClient(main.app, raise_server_exceptions=False)
     response = client.get("/person/nm0001104")
+    assert response.status_code == 503
+
+
+def test_ratings_returns_title_ratings(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/ratings/tt0111161")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["field"] == "ratings"
+    assert data["imdb_id"] == "tt0111161"
+    assert data["result"]["tconst"] == "tt0111161"
+    assert data["result"]["averageRating"] == 9.3
+    assert data["result"]["numVotes"] == 2800000
+    assert data["result"]["titleType"] == "movie"
+
+
+def test_ratings_returns_episode_ratings(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/ratings/tt0502973")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["result"]["tconst"] == "tt0502973"
+    assert data["result"]["titleType"] == "tvEpisode"
+    assert data["result"]["averageRating"] == 8.2
+
+
+def test_genre_returns_title_genres(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/genre/tt0096697")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["imdb_id"] == "tt0096697"
+    assert data["result"]["tconst"] == "tt0096697"
+    assert data["result"]["genres"] == ["Animation", "Comedy", "Family"]
+
+
+def test_ratings_returns_404_for_unknown_title(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/ratings/tt9999999")
+    assert response.status_code == 404
+
+
+def test_genre_returns_404_for_unknown_title(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    client = TestClient(main.app)
+    response = client.get("/genre/tt9999999")
+    assert response.status_code == 404
+
+
+def test_ratings_returns_503_when_no_db(tmp_path, monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "nonexistent.db")
+    client = TestClient(main.app, raise_server_exceptions=False)
+    response = client.get("/ratings/tt0111161")
+    assert response.status_code == 503
+
+
+def test_genre_returns_503_when_no_db(tmp_path, monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "nonexistent.db")
+    client = TestClient(main.app, raise_server_exceptions=False)
+    response = client.get("/genre/tt0111161")
+    assert response.status_code == 503
+
+
+def test_parental_endpoint_uses_cached_value_when_fresh(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        INSERT INTO imdb_parental(imdb_id, nudity, violence, profanity, alcohol, frightening, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "tt0111161",
+            "Mild",
+            "Moderate",
+            "None",
+            "Mild",
+            "Severe",
+            "2026-04-04T00:00:00+00:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    monkeypatch.setattr(main, "PARENTAL_GUIDE_TTL_DAYS", 30)
+
+    async def fail_fetch(_imdb_id):
+        raise AssertionError("network fetch should not occur for fresh cache")
+
+    monkeypatch.setattr(main, "_fetch_parental_guide_html", fail_fetch)
+    client = TestClient(main.app)
+    response = client.get("/parental/tt0111161")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["cached"] is True
+    assert data["parental_guide"]["Nudity"] == "Mild"
+    assert data["parental_guide"]["Frightening"] == "Severe"
+
+
+def test_parental_endpoint_fetches_and_caches_when_missing(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    sample_html = """
+    <html><body>
+      <li class="ipc-metadata-list__item ipc-metadata-list-item--link">
+        <a>Sex &amp; Nudity:</a><div><div><div>Mild</div></div></div>
+      </li>
+      <li class="ipc-metadata-list__item ipc-metadata-list-item--link">
+        <a>Violence &amp; Gore:</a><div><div><div>Moderate</div></div></div>
+      </li>
+      <li class="ipc-metadata-list__item ipc-metadata-list-item--link">
+        <a>Profanity:</a><div><div><div>Severe</div></div></div>
+      </li>
+      <li class="ipc-metadata-list__item ipc-metadata-list-item--link">
+        <a>Alcohol, Drugs &amp; Smoking:</a><div><div><div>None</div></div></div>
+      </li>
+      <li class="ipc-metadata-list__item ipc-metadata-list-item--link">
+        <a>Frightening &amp; Intense Scenes:</a><div><div><div>Mild</div></div></div>
+      </li>
+    </body></html>
+    """
+
+    async def fake_fetch(_imdb_id):
+        return sample_html
+
+    monkeypatch.setattr(main, "_fetch_parental_guide_html", fake_fetch)
+    client = TestClient(main.app)
+    response = client.get("/parental/tt0111161")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["cached"] is False
+    assert data["parental_guide"] == {
+        "Nudity": "Mild",
+        "Violence": "Moderate",
+        "Profanity": "Severe",
+        "Alcohol": "None",
+        "Frightening": "Mild",
+    }
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT nudity, violence, profanity, alcohol, frightening FROM imdb_parental WHERE imdb_id = ?",
+        ("tt0111161",),
+    ).fetchone()
+    conn.close()
+    assert row == ("Mild", "Moderate", "Severe", "None", "Mild")
+
+
+def test_parental_endpoint_ignore_cache_forces_refresh(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        INSERT INTO imdb_parental(imdb_id, nudity, violence, profanity, alcohol, frightening, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "tt0111161",
+            "None",
+            "None",
+            "None",
+            "None",
+            "None",
+            "2026-04-04T00:00:00+00:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    sample_html = """
+    <li class="ipc-metadata-list-item--link">
+      <a>Sex &amp; Nudity:</a><div><div><div>Severe</div></div></div>
+    </li>
+    """
+
+    async def fake_fetch(_imdb_id):
+        return sample_html
+
+    monkeypatch.setattr(main, "_fetch_parental_guide_html", fake_fetch)
+    client = TestClient(main.app)
+    response = client.get("/parental/tt0111161?ignore_cache=true")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["cached"] is False
+    assert data["parental_guide"]["Nudity"] == "Severe"
+    assert data["parental_guide"]["Violence"] == "None"
+
+
+def test_parental_endpoint_returns_404_when_page_has_no_categories(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+
+    async def fake_fetch(_imdb_id):
+        return "<html><body>No parental guide</body></html>"
+
+    monkeypatch.setattr(main, "_fetch_parental_guide_html", fake_fetch)
+    client = TestClient(main.app, raise_server_exceptions=False)
+    response = client.get("/parental/tt0111161")
+    assert response.status_code == 404
+
+
+def test_parental_endpoint_returns_503_when_no_db(tmp_path, monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", tmp_path / "nonexistent.db")
+    client = TestClient(main.app, raise_server_exceptions=False)
+    response = client.get("/parental/tt0111161")
     assert response.status_code == 503
 
 
