@@ -528,6 +528,43 @@ async def _update_parental_cache(imdb_id: str, parental: Dict[str, str]) -> None
         await db.commit()
 
 
+async def _get_parental_cache_stats() -> Dict[str, Any]:
+    """Return cached parental-guide item counts for the stats endpoint."""
+    await _ensure_db_schema()
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT
+                COUNT(*) AS items_cached,
+                SUM(CASE WHEN nudity IS NOT NULL AND nudity != '' THEN 1 ELSE 0 END) AS nudity,
+                SUM(CASE WHEN violence IS NOT NULL AND violence != '' THEN 1 ELSE 0 END) AS violence,
+                SUM(CASE WHEN profanity IS NOT NULL AND profanity != '' THEN 1 ELSE 0 END) AS profanity,
+                SUM(CASE WHEN alcohol IS NOT NULL AND alcohol != '' THEN 1 ELSE 0 END) AS alcohol,
+                SUM(CASE WHEN frightening IS NOT NULL AND frightening != '' THEN 1 ELSE 0 END) AS frightening
+            FROM imdb_parental
+            """
+        )
+        row = await cursor.fetchone()
+
+    if row is None:
+        return {
+            "items_cached": 0,
+            "flag_counts": {column: 0 for column in PARENTAL_DB_COLUMNS.values()},
+        }
+
+    return {
+        "items_cached": row[0] or 0,
+        "flag_counts": {
+            "nudity": row[1] or 0,
+            "violence": row[2] or 0,
+            "profanity": row[3] or 0,
+            "alcohol": row[4] or 0,
+            "frightening": row[5] or 0,
+        },
+    }
+
+
 @app.get("/search")
 async def search(
     type: Optional[str] = Query(None, alias="type"),  # noqa: B008
@@ -930,6 +967,7 @@ async def get_stats() -> Dict[str, Any]:
         }
 
     try:
+        parental_cache = await _get_parental_cache_stats()
         async with aiosqlite.connect(DB_PATH) as db:
             cursor = await db.execute("SELECT value FROM import_meta WHERE key = 'row_counts'")
             row = await cursor.fetchone()
@@ -941,6 +979,7 @@ async def get_stats() -> Dict[str, Any]:
             "last_refresh": last_refresh,
             "last_activity": last_activity,
             "table_counts": counts,
+            "parental_cache": parental_cache,
             "charts_cached": list(charts.chart_cache.keys()),
         }
     except Exception as e:
