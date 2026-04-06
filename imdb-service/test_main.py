@@ -551,6 +551,7 @@ def test_stats_returns_initializing_when_no_db(tmp_path, monkeypatch):
     assert "download_progress" in data
     assert "import_progress" in data
     assert "last_activity" in data
+    assert "parental_cache" not in data
 
 
 def test_stats_returns_online_with_db(tmp_path, monkeypatch):
@@ -593,7 +594,74 @@ def test_stats_returns_online_with_db(tmp_path, monkeypatch):
     for table in row_counts:
         assert table in data["table_counts"], f"Missing table count: {table}"
         assert data["table_counts"][table] == row_counts[table]
+    assert data["parental_cache"]["items_cached"] == 0
+    assert data["parental_cache"]["flag_counts"] == {
+        "nudity": 0,
+        "violence": 0,
+        "profanity": 0,
+        "alcohol": 0,
+        "frightening": 0,
+    }
     assert "charts_cached" in data
+
+
+def test_stats_returns_parental_cache_item_details(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        INSERT INTO imdb_parental(imdb_id, nudity, violence, profanity, alcohol, frightening, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "tt0111161",
+            "Mild",
+            "Moderate",
+            "None",
+            "Mild",
+            "Severe",
+            "2026-04-04T00:00:00+00:00",
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO imdb_parental(imdb_id, nudity, violence, profanity, alcohol, frightening, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "tt0096697",
+            "None",
+            "",
+            "Mild",
+            None,
+            "Moderate",
+            "2026-04-04T00:00:00+00:00",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    monkeypatch.setattr(main, "last_refresh", "2026-03-24T03:00:00+00:00")
+    monkeypatch.setattr(main, "current_phase", "idle")
+    monkeypatch.setattr(main, "last_activity", None)
+    client = TestClient(main.app)
+    response = client.get("/stats")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["parental_cache"] == {
+        "items_cached": 2,
+        "flag_counts": {
+            "nudity": 2,
+            "violence": 1,
+            "profanity": 2,
+            "alcohol": 1,
+            "frightening": 2,
+        },
+    }
 
 
 def test_root_returns_html(tmp_path, monkeypatch):
