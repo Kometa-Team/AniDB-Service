@@ -77,24 +77,16 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       - name: Build imdb-service-base
-        uses: docker/build-push-action@v7
-        with:
-          context: ./imdb-service
-          file: ./imdb-service/Dockerfile.base
-          push: false
-          load: true
-          tags: kometa-utilities/imdb-service-base:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: |
+          docker build \
+            -f ./imdb-service/Dockerfile.base \
+            -t kometa-utilities/imdb-service-base:${{ github.sha }} \
+            ./imdb-service
 
       - name: Build imdb-service
-        uses: docker/build-push-action@v7
-        with:
-          context: ./imdb-service
-          file: ./imdb-service/Dockerfile
-          push: false
-          build-args: |
-            BASE_IMAGE=kometa-utilities/imdb-service-base:${{ github.sha }}
-          tags: kometa-utilities/imdb-service:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: |
+          docker build \
+            -f ./imdb-service/Dockerfile \
+            --build-arg BASE_IMAGE=kometa-utilities/imdb-service-base:${{ github.sha }} \
+            -t kometa-utilities/imdb-service:${{ github.sha }} \
+            ./imdb-service
