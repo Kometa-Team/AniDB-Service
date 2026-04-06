@@ -993,6 +993,98 @@ def test_parental_endpoint_returns_503_when_no_db(tmp_path, monkeypatch):
     assert response.status_code == 503
 
 
+@pytest.mark.asyncio
+async def test_fetch_parental_html_falls_back_to_browser_on_empty_http(monkeypatch):
+    import main
+
+    sample_html = """
+    <li class="ipc-metadata-list-item--link">
+      <a>Sex &amp; Nudity:</a><div><div><div>Mild</div></div></div>
+    </li>
+    """
+
+    async def fake_http(_imdb_id):
+        return "<html><body>Accepted</body></html>"
+
+    async def fake_browser(_imdb_id):
+        return sample_html
+
+    monkeypatch.setattr(main, "_fetch_parental_guide_html_via_http", fake_http)
+    monkeypatch.setattr(main, "_fetch_parental_guide_html_via_browser", fake_browser)
+
+    html = await main._fetch_parental_guide_html("tt0111161")
+    assert "Sex &amp; Nudity" in html
+
+
+@pytest.mark.asyncio
+async def test_fetch_parental_html_uses_http_when_markers_present(monkeypatch):
+    import main
+
+    sample_html = """
+    <li class="ipc-metadata-list-item--link">
+      <a>Violence &amp; Gore:</a><div><div><div>Moderate</div></div></div>
+    </li>
+    """
+
+    async def fake_http(_imdb_id):
+        return sample_html
+
+    async def fail_browser(_imdb_id):
+        raise AssertionError("browser fallback should not run")
+
+    monkeypatch.setattr(main, "_fetch_parental_guide_html_via_http", fake_http)
+    monkeypatch.setattr(main, "_fetch_parental_guide_html_via_browser", fail_browser)
+
+    html = await main._fetch_parental_guide_html("tt0111161")
+    assert "Violence &amp; Gore" in html
+
+
+@pytest.mark.asyncio
+async def test_fetch_parental_html_does_not_fallback_on_404(monkeypatch):
+    from fastapi import HTTPException
+
+    import main
+
+    async def fake_http(_imdb_id):
+        raise HTTPException(status_code=404, detail="not found")
+
+    async def fail_browser(_imdb_id):
+        raise AssertionError("browser fallback should not run on 404")
+
+    monkeypatch.setattr(main, "_fetch_parental_guide_html_via_http", fake_http)
+    monkeypatch.setattr(main, "_fetch_parental_guide_html_via_browser", fail_browser)
+
+    with pytest.raises(HTTPException, match="not found"):
+        await main._fetch_parental_guide_html("tt9999999")
+
+
+def test_html_has_waf_challenge_detects_imdb_interstitial():
+    import main
+
+    html = """
+    <html><body>
+    <script>window.AwsWafIntegration = {};</script>
+    <noscript>In order to continue, we need to verify that you're not a robot.</noscript>
+    </body></html>
+    """
+
+    assert main._html_has_waf_challenge(html) is True
+
+
+def test_html_has_waf_challenge_ignores_real_parental_page():
+    import main
+
+    html = """
+    <html><body>
+      <li class="ipc-metadata-list-item--link">
+        <a>Sex &amp; Nudity:</a><div><div><div>Mild</div></div></div>
+      </li>
+    </body></html>
+    """
+
+    assert main._html_has_waf_challenge(html) is False
+
+
 def test_get_chart_top_movies_returns_list(tmp_path, monkeypatch):
     import charts
 

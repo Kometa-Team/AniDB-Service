@@ -1,4 +1,5 @@
 aiosqlite
 fastapi
 httpx
+playwright
 uvicorn[standard]

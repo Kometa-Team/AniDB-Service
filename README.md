@@ -39,5 +39,29 @@ Relevant workflow files:
 
 - `.github/workflows/docker-pr-build.yml`
 - `.github/workflows/docker-build.yml`
+- `.github/workflows/deploy.yml`
 
 This lets contributors verify Docker changes in PRs while keeping image publishing limited to the `main` branch.
+
+## Deployment Workflow
+
+The repository also includes a deployment workflow that connects to the remote server over SSH after the `Docker Builds` workflow completes successfully on `main`.
+
+The workflow:
+
+- pulls the latest Git branch on the server
+- runs `docker compose pull`
+- runs `docker compose up -d`
+- prunes dangling Docker images
+
+Required GitHub Actions secrets:
+
+- `DEPLOY_HOST`
+- `DEPLOY_USER`
+- `DEPLOY_SSH_KEY`
+- `DEPLOY_PROJECT_DIR`
+
+Optional secrets:
+
+- `DEPLOY_PORT` (defaults to `22`)
+- `DEPLOY_BRANCH` (defaults to `main`)

@@ -8,7 +8,7 @@ from datetime import date, datetime, timedelta, timezone
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 import aiosqlite
 import charts
@@ -22,7 +22,9 @@ DB_PATH = DATA_DIR / "imdb.db"
 ROOT_PATH = os.getenv("ROOT_PATH", "")
 REFRESH_HOUR = int(os.getenv("REFRESH_HOUR", "3"))
 MIN_VOTES_CHART = int(os.getenv("MIN_VOTES_CHART", "25000"))
-PARENTAL_GUIDE_TTL_DAYS = int(os.getenv("PARENTAL_GUIDE_TTL_DAYS", "30"))
+PARENTAL_GUIDE_TTL_DAYS = int(os.getenv("PARENTAL_GUIDE_TTL_DAYS", "90"))
+PARENTAL_BROWSER_ENABLED = os.getenv("PARENTAL_BROWSER_ENABLED", "true").lower() == "true"
+PARENTAL_BROWSER_TIMEOUT_SECONDS = int(os.getenv("PARENTAL_BROWSER_TIMEOUT_SECONDS", "30"))
 IMDB_WEB_BASE_URL = "https://www.imdb.com"
 
 # --- Global state ---
@@ -324,8 +326,27 @@ def _parse_parental_guide_html(html_text: str) -> Dict[str, str]:
     return parsed
 
 
-async def _fetch_parental_guide_html(imdb_id: str) -> str:
-    """Fetch the IMDb parental guide page for a title."""
+def _html_has_parental_markers(html_text: str) -> bool:
+    """Return True when the HTML appears to contain IMDb parental guide categories."""
+    decoded_html = unescape(html_text)
+    return any(category in decoded_html for category in PARENTAL_TYPE_MAP)
+
+
+def _html_has_waf_challenge(html_text: str) -> bool:
+    """Return True when IMDb served an AWS WAF challenge/interstitial page."""
+    lowered = html_text.lower()
+    waf_markers = (
+        "awswafintegration",
+        "challenge.js",
+        "token.awswaf.com",
+        "not a robot",
+        "javascript is disabled",
+    )
+    return any(marker in lowered for marker in waf_markers)
+
+
+async def _fetch_parental_guide_html_via_http(imdb_id: str) -> str:
+    """Fetch the IMDb parental guide page for a title via direct HTTP."""
     url = f"{IMDB_WEB_BASE_URL}/title/{imdb_id}/parentalguide"
     headers = {
         "User-Agent": "Mozilla/5.0 (compatible; Kometa-Utilities/IMDb-Service)",
@@ -336,6 +357,11 @@ async def _fetch_parental_guide_html(imdb_id: str) -> str:
             follow_redirects=True, timeout=30.0, headers=headers
         ) as client:
             response = await client.get(url)
+            if response.status_code == 202:
+                raise HTTPException(
+                    status_code=502,
+                    detail="IMDb parental guide request returned 202 Accepted without usable content",
+                )
             response.raise_for_status()
             return response.text
     except httpx.HTTPStatusError as e:
@@ -346,6 +372,81 @@ async def _fetch_parental_guide_html(imdb_id: str) -> str:
         )
     except httpx.HTTPError as e:
         raise HTTPException(status_code=502, detail=f"IMDb parental guide request failed: {e}")
+
+
+async def _fetch_parental_guide_html_via_browser(imdb_id: str) -> str:
+    """Fetch the IMDb parental guide page using a headless browser fallback."""
+    if not PARENTAL_BROWSER_ENABLED:
+        raise HTTPException(status_code=502, detail="Browser fallback is disabled")
+
+    try:
+        from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+        from playwright.async_api import async_playwright
+    except ImportError as e:
+        raise HTTPException(status_code=502, detail=f"Playwright is not installed: {e}")
+
+    url = f"{IMDB_WEB_BASE_URL}/title/{imdb_id}/parentalguide"
+    timeout_ms = PARENTAL_BROWSER_TIMEOUT_SECONDS * 1000
+    try:
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=True)
+            page = await browser.new_page(
+                locale="en-US",
+                user_agent="Mozilla/5.0 (compatible; Kometa-Utilities/IMDb-Service Browser Fallback)",
+            )
+            try:
+                response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+                if response and response.status == 404:
+                    raise HTTPException(status_code=404, detail=f"Title {imdb_id!r} not found")
+                deadline = asyncio.get_running_loop().time() + PARENTAL_BROWSER_TIMEOUT_SECONDS
+                last_html = cast(str, await page.content())
+                if _html_has_parental_markers(last_html):
+                    return last_html
+
+                while asyncio.get_running_loop().time() < deadline:
+                    if _html_has_waf_challenge(last_html):
+                        # IMDb serves an AWS WAF challenge page first; give it time to mint a token and reload.
+                        await page.wait_for_timeout(2000)
+                    else:
+                        try:
+                            await page.wait_for_load_state("domcontentloaded", timeout=2000)
+                        except PlaywrightTimeoutError:
+                            pass
+                        await page.wait_for_timeout(500)
+
+                    current_html = cast(str, await page.content())
+                    if _html_has_parental_markers(current_html):
+                        return current_html
+                    last_html = current_html
+
+                raise HTTPException(
+                    status_code=504,
+                    detail="Playwright parental guide fetch timed out before the page cleared the WAF challenge",
+                )
+            finally:
+                await page.close()
+                await browser.close()
+    except PlaywrightTimeoutError as e:
+        raise HTTPException(
+            status_code=504, detail=f"Playwright parental guide fetch timed out: {e}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Playwright parental guide fetch failed: {e}")
+
+
+async def _fetch_parental_guide_html(imdb_id: str) -> str:
+    """Fetch the IMDb parental guide page for a title, falling back to a browser if needed."""
+    try:
+        html_text = await _fetch_parental_guide_html_via_http(imdb_id)
+        if _html_has_parental_markers(html_text):
+            return html_text
+    except HTTPException as e:
+        if e.status_code == 404:
+            raise
+
+    return await _fetch_parental_guide_html_via_browser(imdb_id)
 
 
 async def _query_parental_cache(imdb_id: str) -> tuple[Optional[Dict[str, str]], Optional[bool]]:
