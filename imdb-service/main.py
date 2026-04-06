@@ -15,6 +15,7 @@ import charts
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
+from importer import SCHEMA_SQL
 
 # --- Config ---
 DATA_DIR = Path(os.getenv("DATA_DIR", "/app/data"))
@@ -43,6 +44,16 @@ def _set_phase(phase: str) -> None:
     last_activity = datetime.now(timezone.utc).isoformat()
 
 
+async def _ensure_db_schema() -> None:
+    """Apply idempotent schema creation for an existing database file."""
+    if not DB_PATH.exists():
+        return
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.executescript(SCHEMA_SQL)
+        await db.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application startup and shutdown: load DB state, rebuild charts, start scheduler."""
@@ -52,6 +63,11 @@ async def lifespan(app: FastAPI):
     print("🔧 Initializing IMDB Service...")
 
     if DB_PATH.exists():
+        try:
+            await _ensure_db_schema()
+        except Exception as e:
+            print(f"⚠️  Could not apply schema updates: {e}")
+
         # Load last refresh time from DB
         try:
             async with aiosqlite.connect(DB_PATH) as db:
@@ -451,6 +467,8 @@ async def _fetch_parental_guide_html(imdb_id: str) -> str:
 
 async def _query_parental_cache(imdb_id: str) -> tuple[Optional[Dict[str, str]], Optional[bool]]:
     """Read cached parental-guide data and indicate whether it is expired."""
+    await _ensure_db_schema()
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("SELECT * FROM imdb_parental WHERE imdb_id = ?", (imdb_id,))
@@ -482,6 +500,8 @@ async def _query_parental_cache(imdb_id: str) -> tuple[Optional[Dict[str, str]],
 
 async def _update_parental_cache(imdb_id: str, parental: Dict[str, str]) -> None:
     """Upsert cached parental-guide data for a title."""
+    await _ensure_db_schema()
+
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """

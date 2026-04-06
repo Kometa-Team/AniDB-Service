@@ -644,6 +644,36 @@ def _seed_full_test_db(db_path):
     conn.close()
 
 
+def _seed_legacy_test_db_without_parental(db_path):
+    """Seed an older DB shape that predates the imdb_parental table."""
+    conn = sqlite3.connect(db_path)
+    conn.executescript(
+        """
+        CREATE TABLE import_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
+
+        CREATE TABLE title_basics (
+            tconst TEXT PRIMARY KEY,
+            titleType TEXT,
+            primaryTitle TEXT,
+            originalTitle TEXT,
+            isAdult INTEGER,
+            startYear INTEGER,
+            endYear INTEGER,
+            runtimeMinutes INTEGER,
+            genres TEXT
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO title_basics VALUES ('tt0111161','movie','The Shawshank Redemption','The Shawshank Redemption',0,1994,NULL,142,'Drama,Crime,Thriller')"
+    )
+    conn.commit()
+    conn.close()
+
+
 def test_get_title_returns_full_record(tmp_path, monkeypatch):
     db_path = tmp_path / "imdb.db"
     _seed_full_test_db(db_path)
@@ -922,6 +952,36 @@ def test_parental_endpoint_fetches_and_caches_when_missing(tmp_path, monkeypatch
     ).fetchone()
     conn.close()
     assert row == ("Mild", "Moderate", "Severe", "None", "Mild")
+
+
+def test_parental_endpoint_creates_missing_parental_table_on_existing_db(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_legacy_test_db_without_parental(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+    sample_html = """
+    <li class="ipc-metadata-list-item--link">
+      <a>Sex &amp; Nudity:</a><div><div><div>Mild</div></div></div>
+    </li>
+    """
+
+    async def fake_fetch(_imdb_id):
+        return sample_html
+
+    monkeypatch.setattr(main, "_fetch_parental_guide_html", fake_fetch)
+    client = TestClient(main.app)
+    response = client.get("/parental/tt0111161")
+    assert response.status_code == 200
+    assert response.json()["parental_guide"]["Nudity"] == "Mild"
+
+    conn = sqlite3.connect(db_path)
+    row = conn.execute(
+        "SELECT nudity FROM imdb_parental WHERE imdb_id = ?",
+        ("tt0111161",),
+    ).fetchone()
+    conn.close()
+    assert row == ("Mild",)
 
 
 def test_parental_endpoint_ignore_cache_forces_refresh(tmp_path, monkeypatch):
