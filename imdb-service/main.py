@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import secrets
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from html import unescape
@@ -26,6 +27,12 @@ MIN_VOTES_CHART = int(os.getenv("MIN_VOTES_CHART", "25000"))
 PARENTAL_GUIDE_TTL_DAYS = int(os.getenv("PARENTAL_GUIDE_TTL_DAYS", "90"))
 PARENTAL_BROWSER_ENABLED = os.getenv("PARENTAL_BROWSER_ENABLED", "true").lower() == "true"
 PARENTAL_BROWSER_TIMEOUT_SECONDS = int(os.getenv("PARENTAL_BROWSER_TIMEOUT_SECONDS", "30"))
+PARENTAL_PROXY_ENABLED = os.getenv("PARENTAL_PROXY_ENABLED", "false").lower() == "true"
+PARENTAL_PROXY_URLS = [
+    p.strip() for p in os.getenv("PARENTAL_PROXY_URLS", "").split(",") if p.strip()
+]
+PARENTAL_PROXY_RETRY_COUNT = int(os.getenv("PARENTAL_PROXY_RETRY_COUNT", "2"))
+PARENTAL_PROXY_BAN_TTL_MINUTES = int(os.getenv("PARENTAL_PROXY_BAN_TTL_MINUTES", "30"))
 IMDB_WEB_BASE_URL = "https://www.imdb.com"
 
 # --- Global state ---
@@ -35,6 +42,7 @@ current_phase: str = "idle"  # idle | downloading | importing | building_charts
 download_progress: Dict[str, str] = {}  # dataset stem → pending|downloading|done
 import_progress: Dict[str, Any] = {}  # table → {status, rows}
 last_activity: Optional[str] = None  # ISO timestamp of last phase change
+proxy_health: Dict[str, datetime] = {}  # proxy URL -> cooldown-until UTC
 
 
 def _set_phase(phase: str) -> None:
@@ -42,6 +50,38 @@ def _set_phase(phase: str) -> None:
     global current_phase, last_activity
     current_phase = phase
     last_activity = datetime.now(timezone.utc).isoformat()
+
+
+def _proxy_candidates(exclude: Optional[set[str]] = None) -> list[str]:
+    """Return currently healthy configured parental proxies."""
+    if not PARENTAL_PROXY_ENABLED:
+        return []
+    now = datetime.now(timezone.utc)
+    excluded = exclude or set()
+    healthy = []
+    for proxy in PARENTAL_PROXY_URLS:
+        cooldown_until = proxy_health.get(proxy)
+        if proxy in excluded:
+            continue
+        if cooldown_until is not None and cooldown_until > now:
+            continue
+        healthy.append(proxy)
+    return healthy
+
+
+def _choose_parental_proxy(exclude: Optional[set[str]] = None) -> Optional[str]:
+    """Choose a healthy proxy for a parental fetch attempt."""
+    candidates = _proxy_candidates(exclude)
+    if not candidates:
+        return None
+    return secrets.choice(candidates)
+
+
+def _mark_proxy_failed(proxy_url: str) -> None:
+    """Temporarily cool down a proxy after a failed fetch."""
+    proxy_health[proxy_url] = datetime.now(timezone.utc) + timedelta(
+        minutes=PARENTAL_PROXY_BAN_TTL_MINUTES
+    )
 
 
 async def _ensure_db_schema() -> None:
@@ -361,7 +401,7 @@ def _html_has_waf_challenge(html_text: str) -> bool:
     return any(marker in lowered for marker in waf_markers)
 
 
-async def _fetch_parental_guide_html_via_http(imdb_id: str) -> str:
+async def _fetch_parental_guide_html_via_http(imdb_id: str, proxy_url: Optional[str] = None) -> str:
     """Fetch the IMDb parental guide page for a title via direct HTTP."""
     url = f"{IMDB_WEB_BASE_URL}/title/{imdb_id}/parentalguide"
     headers = {
@@ -370,7 +410,10 @@ async def _fetch_parental_guide_html_via_http(imdb_id: str) -> str:
     }
     try:
         async with httpx.AsyncClient(
-            follow_redirects=True, timeout=30.0, headers=headers
+            follow_redirects=True,
+            timeout=30.0,
+            headers=headers,
+            proxy=proxy_url,
         ) as client:
             response = await client.get(url)
             if response.status_code == 202:
@@ -390,7 +433,9 @@ async def _fetch_parental_guide_html_via_http(imdb_id: str) -> str:
         raise HTTPException(status_code=502, detail=f"IMDb parental guide request failed: {e}")
 
 
-async def _fetch_parental_guide_html_via_browser(imdb_id: str) -> str:
+async def _fetch_parental_guide_html_via_browser(
+    imdb_id: str, proxy_url: Optional[str] = None
+) -> str:
     """Fetch the IMDb parental guide page using a headless browser fallback."""
     if not PARENTAL_BROWSER_ENABLED:
         raise HTTPException(status_code=502, detail="Browser fallback is disabled")
@@ -405,7 +450,10 @@ async def _fetch_parental_guide_html_via_browser(imdb_id: str) -> str:
     timeout_ms = PARENTAL_BROWSER_TIMEOUT_SECONDS * 1000
     try:
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(headless=True)
+            browser_kwargs: Dict[str, Any] = {"headless": True}
+            if proxy_url:
+                browser_kwargs["proxy"] = {"server": proxy_url}
+            browser = await playwright.chromium.launch(**browser_kwargs)
             page = await browser.new_page(
                 locale="en-US",
                 user_agent="Mozilla/5.0 (compatible; Kometa-Utilities/IMDb-Service Browser Fallback)",
@@ -454,15 +502,39 @@ async def _fetch_parental_guide_html_via_browser(imdb_id: str) -> str:
 
 async def _fetch_parental_guide_html(imdb_id: str) -> str:
     """Fetch the IMDb parental guide page for a title, falling back to a browser if needed."""
-    try:
-        html_text = await _fetch_parental_guide_html_via_http(imdb_id)
-        if _html_has_parental_markers(html_text):
-            return html_text
-    except HTTPException as e:
-        if e.status_code == 404:
-            raise
+    attempted_proxies: set[str] = set()
+    attempts = max(1, PARENTAL_PROXY_RETRY_COUNT if PARENTAL_PROXY_ENABLED else 1)
+    last_error: Optional[HTTPException] = None
 
-    return await _fetch_parental_guide_html_via_browser(imdb_id)
+    for _ in range(attempts):
+        proxy_url = _choose_parental_proxy(attempted_proxies)
+        if proxy_url:
+            attempted_proxies.add(proxy_url)
+        try:
+            html_text = await _fetch_parental_guide_html_via_http(imdb_id, proxy_url)
+            if _html_has_parental_markers(html_text):
+                return html_text
+        except HTTPException as e:
+            if e.status_code == 404:
+                raise
+            last_error = e
+            if proxy_url:
+                _mark_proxy_failed(proxy_url)
+
+        try:
+            return await _fetch_parental_guide_html_via_browser(imdb_id, proxy_url)
+        except HTTPException as e:
+            if e.status_code == 404:
+                raise
+            last_error = e
+            if proxy_url:
+                _mark_proxy_failed(proxy_url)
+
+    if last_error:
+        raise last_error
+    raise HTTPException(
+        status_code=502, detail="IMDb parental guide fetch failed without a usable response"
+    )
 
 
 async def _query_parental_cache(imdb_id: str) -> tuple[Optional[Dict[str, str]], Optional[bool]]:

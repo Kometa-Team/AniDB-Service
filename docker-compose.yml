@@ -146,6 +146,10 @@ services:
       - DATA_DIR=/app/data
       - TMP_DIR=/app/data
       - MIN_VOTES_CHART=25000
+      - PARENTAL_PROXY_ENABLED=${PARENTAL_PROXY_ENABLED:-false}
+      - PARENTAL_PROXY_URLS=${PARENTAL_PROXY_URLS:-}
+      - PARENTAL_PROXY_RETRY_COUNT=${PARENTAL_PROXY_RETRY_COUNT:-1}
+      - PARENTAL_PROXY_BAN_TTL_MINUTES=${PARENTAL_PROXY_BAN_TTL_MINUTES:-30}
     volumes:
       - imdb-data:/app/data
     deploy:

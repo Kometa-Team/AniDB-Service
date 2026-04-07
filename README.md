@@ -80,3 +80,39 @@ Optional secrets:
 
 - `DEPLOY_PORT` (defaults to `22`)
 - `DEPLOY_BRANCH` (defaults to `main`)
+
+## IMDb Parental Proxying
+
+The IMDb parental guide fetch path supports optional proxy rotation so repeated browser-backed parental requests do not all originate from the same IP.
+
+Supported environment variables for `imdb-service`:
+
+- `PARENTAL_PROXY_ENABLED`
+- `PARENTAL_PROXY_URLS`
+- `PARENTAL_PROXY_RETRY_COUNT`
+- `PARENTAL_PROXY_BAN_TTL_MINUTES`
+
+Example:
+
+```env
+PARENTAL_PROXY_ENABLED=true
+PARENTAL_PROXY_URLS=http://user:pass@proxy1.example.com:8080,http://user:pass@proxy2.example.com:8080
+PARENTAL_PROXY_RETRY_COUNT=2
+PARENTAL_PROXY_BAN_TTL_MINUTES=30
+```
+
+Notes:
+
+- proxy rotation is used only for IMDb parental guide fetches
+- failed proxies are temporarily cooled down in-process before reuse
+- cached parental guide data is still preferred, so proxy usage should stay low in normal operation
+- for docker compose deployments, put these values in the server-side `.env` file rather than committing credentials into `docker-compose.yml`
+
+Example server-side `.env` values:
+
+```env
+PARENTAL_PROXY_ENABLED=true
+PARENTAL_PROXY_URLS=http://username:password@proxy-host:port
+PARENTAL_PROXY_RETRY_COUNT=1
+PARENTAL_PROXY_BAN_TTL_MINUTES=30
+```
