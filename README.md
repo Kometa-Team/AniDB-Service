@@ -14,6 +14,7 @@ This repository publishes Docker images for its locally maintained utility servi
 - `ghcr.io/kometa-team/mal-oauth`
 - `ghcr.io/kometa-team/simkl-oauth`
 - `ghcr.io/kometa-team/simkl-service`
+- `ghcr.io/kometa-team/imdb-service`
 
 The base `docker-compose.yml` uses those published GHCR images.
 
@@ -26,6 +27,20 @@ If you want to force a local rebuild, use:
 
 ```bash
 docker compose up -d --build
+```
+
+For `imdb-service`, the Playwright/browser layer now lives in a separate base image so code-only updates stay small. To rebuild both the IMDb base image and the app image locally in one step, use:
+
+```bash
+./imdb-service/build-local.sh
+```
+
+Optional overrides:
+
+```bash
+BASE_IMAGE=ghcr.io/kometa-team/imdb-service-base:dev \
+APP_IMAGE=ghcr.io/kometa-team/imdb-service:dev \
+./imdb-service/build-local.sh
 ```
 
 ## GitHub Actions
