@@ -2,4 +2,5 @@ aiosqlite
 fastapi
 httpx
 playwright
+playwright_stealth
 uvicorn[standard]

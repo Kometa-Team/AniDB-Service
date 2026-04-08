@@ -6,6 +6,7 @@ import io
 import json
 import sqlite3
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1131,10 +1132,10 @@ async def test_fetch_parental_html_falls_back_to_browser_on_empty_http(monkeypat
     </li>
     """
 
-    async def fake_http(_imdb_id):
+    async def fake_http(_imdb_id, proxy_url=None):
         return "<html><body>Accepted</body></html>"
 
-    async def fake_browser(_imdb_id):
+    async def fake_browser(_imdb_id, proxy_url=None):
         return sample_html
 
     monkeypatch.setattr(main, "_fetch_parental_guide_html_via_http", fake_http)
@@ -1154,10 +1155,10 @@ async def test_fetch_parental_html_uses_http_when_markers_present(monkeypatch):
     </li>
     """
 
-    async def fake_http(_imdb_id):
+    async def fake_http(_imdb_id, proxy_url=None):
         return sample_html
 
-    async def fail_browser(_imdb_id):
+    async def fail_browser(_imdb_id, proxy_url=None):
         raise AssertionError("browser fallback should not run")
 
     monkeypatch.setattr(main, "_fetch_parental_guide_html_via_http", fake_http)
@@ -1173,10 +1174,10 @@ async def test_fetch_parental_html_does_not_fallback_on_404(monkeypatch):
 
     import main
 
-    async def fake_http(_imdb_id):
+    async def fake_http(_imdb_id, proxy_url=None):
         raise HTTPException(status_code=404, detail="not found")
 
-    async def fail_browser(_imdb_id):
+    async def fail_browser(_imdb_id, proxy_url=None):
         raise AssertionError("browser fallback should not run on 404")
 
     monkeypatch.setattr(main, "_fetch_parental_guide_html_via_http", fake_http)
@@ -1211,6 +1212,80 @@ def test_html_has_waf_challenge_ignores_real_parental_page():
     """
 
     assert main._html_has_waf_challenge(html) is False
+
+
+def test_choose_parental_proxy_skips_cooled_down_entries(monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "PARENTAL_PROXY_ENABLED", True)
+    monkeypatch.setattr(main, "PARENTAL_PROXY_URLS", ["http://proxy-a", "http://proxy-b"])
+    monkeypatch.setattr(
+        main,
+        "proxy_health",
+        {"http://proxy-a": datetime.now(timezone.utc) + timedelta(minutes=10)},
+    )
+
+    proxy = main._choose_parental_proxy()
+    assert proxy == "http://proxy-b"
+
+
+def test_playwright_proxy_settings_uses_decodo_sticky_browser_session(monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "PARENTAL_DECODO_BROWSER_ENABLED", True)
+    monkeypatch.setattr(main, "PARENTAL_DECODO_BROWSER_HOST", "gate.decodo.com")
+    monkeypatch.setattr(main, "PARENTAL_DECODO_BROWSER_PORT", 7000)
+    monkeypatch.setattr(main, "PARENTAL_DECODO_BROWSER_USERNAME", "user-example")
+    monkeypatch.setattr(main, "PARENTAL_DECODO_BROWSER_PASSWORD", "secret")
+    monkeypatch.setattr(main, "PARENTAL_DECODO_BROWSER_COUNTRY", "us")
+    monkeypatch.setattr(main, "PARENTAL_DECODO_BROWSER_SESSION_DURATION_MINUTES", 60)
+    monkeypatch.setattr(main, "parental_decodo_browser_session_id", None)
+
+    first_key, first_settings = main._playwright_proxy_identity(None)
+    second_key, second_settings = main._playwright_proxy_identity(None)
+
+    assert first_key == second_key
+    assert first_settings == second_settings
+    assert first_settings["server"] == "http://gate.decodo.com:7000"
+    assert first_settings["password"] == "secret"
+    assert first_settings["username"].startswith("user-example-country-us-session-")
+    assert first_settings["username"].endswith("-sessionduration-60")
+
+
+@pytest.mark.asyncio
+async def test_fetch_parental_html_retries_with_second_proxy(monkeypatch):
+    from fastapi import HTTPException
+
+    import main
+
+    sample_html = """
+    <li class="ipc-metadata-list-item--link">
+      <a>Sex &amp; Nudity:</a><div><div><div>Mild</div></div></div>
+    </li>
+    """
+    proxies = iter(["http://proxy-a", "http://proxy-b"])
+
+    monkeypatch.setattr(main, "PARENTAL_PROXY_ENABLED", True)
+    monkeypatch.setattr(main, "PARENTAL_PROXY_RETRY_COUNT", 2)
+    monkeypatch.setattr(main, "proxy_health", {})
+    monkeypatch.setattr(main, "_choose_parental_proxy", lambda _exclude=None: next(proxies, None))
+
+    async def fake_http(_imdb_id, proxy_url=None):
+        if proxy_url == "http://proxy-a":
+            raise HTTPException(status_code=502, detail="blocked")
+        return "<html><body>accepted</body></html>"
+
+    async def fake_browser(_imdb_id, proxy_url=None):
+        if proxy_url == "http://proxy-a":
+            raise HTTPException(status_code=502, detail="waf")
+        return sample_html
+
+    monkeypatch.setattr(main, "_fetch_parental_guide_html_via_http", fake_http)
+    monkeypatch.setattr(main, "_fetch_parental_guide_html_via_browser", fake_browser)
+
+    html = await main._fetch_parental_guide_html("tt0111161")
+    assert "Sex &amp; Nudity" in html
+    assert "http://proxy-a" in main.proxy_health
 
 
 def test_get_chart_top_movies_returns_list(tmp_path, monkeypatch):
