@@ -1113,6 +1113,30 @@ def test_parental_endpoint_returns_404_when_page_has_no_categories(tmp_path, mon
     assert response.status_code == 404
 
 
+def test_parental_endpoint_returns_404_when_page_has_no_guide_notice(tmp_path, monkeypatch):
+    db_path = tmp_path / "imdb.db"
+    _seed_full_test_db(db_path)
+    import main
+
+    monkeypatch.setattr(main, "DB_PATH", db_path)
+
+    async def fake_fetch(_imdb_id):
+        return """
+        <article class="sc-a750b45a-0 dawkdM">
+          <p>It looks like we don't have a parents guide for this title yet.
+          <button>Be the first to contribute.</button></p>
+          <a href="https://contribute.imdb.com/updates/guide/parental_guide?ref_=ttpg_emt_hlp">
+            Learn more
+          </a>
+        </article>
+        """
+
+    monkeypatch.setattr(main, "_fetch_parental_guide_html", fake_fetch)
+    client = TestClient(main.app, raise_server_exceptions=False)
+    response = client.get("/parental/tt0111161")
+    assert response.status_code == 404
+
+
 def test_parental_endpoint_returns_503_when_no_db(tmp_path, monkeypatch):
     import main
 
@@ -1212,6 +1236,22 @@ def test_html_has_waf_challenge_ignores_real_parental_page():
     """
 
     assert main._html_has_waf_challenge(html) is False
+
+
+def test_html_has_no_parental_guide_notice_detects_empty_notice():
+    import main
+
+    html = """
+    <article class="sc-a750b45a-0 dawkdM">
+      <p>It looks like we don't have a parents guide for this title yet.
+      <button>Be the first to contribute.</button></p>
+      <a href="https://contribute.imdb.com/updates/guide/parental_guide?ref_=ttpg_emt_hlp">
+        Learn more
+      </a>
+    </article>
+    """
+
+    assert main._html_has_no_parental_guide_notice(html) is True
 
 
 def test_choose_parental_proxy_skips_cooled_down_entries(monkeypatch):

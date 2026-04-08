@@ -651,6 +651,8 @@ def _parse_parental_guide_html(html_text: str) -> Dict[str, str]:
     parser = _ParentalGuideParser()
     parser.feed(html_text)
     parsed = _normalize_parental_payload(parser.results)
+    if _html_has_no_parental_guide_notice(html_text):
+        raise HTTPException(status_code=404, detail="No parental guide found")
     if all(value == "None" for value in parsed.values()):
         raise HTTPException(status_code=404, detail="No parental guide found")
     return parsed
@@ -675,6 +677,17 @@ def _html_has_waf_challenge(html_text: str) -> bool:
     return any(marker in lowered for marker in waf_markers)
 
 
+def _html_has_no_parental_guide_notice(html_text: str) -> bool:
+    """Return True when IMDb explicitly says the title has no parents guide yet."""
+    lowered = unescape(html_text).lower()
+    return (
+        "we don't have a parents guide for this title yet" in lowered
+        or "we do not have a parents guide for this title yet" in lowered
+        or "be the first to contribute" in lowered
+        and "parental_guide" in lowered
+    )
+
+
 async def _wait_for_parental_page_ready(page: Any) -> None:
     """Wait until the parental-guide page exposes a stable advisory element."""
     selector_timeout_ms = PARENTAL_BROWSER_SELECTOR_TIMEOUT_SECONDS * 1000
@@ -688,6 +701,8 @@ async def _wait_for_parental_page_ready(page: Any) -> None:
             continue  # nosec B112
 
     html_text = cast(str, await page.content())
+    if _html_has_no_parental_guide_notice(html_text):
+        raise HTTPException(status_code=404, detail="No parental guide found")
     if _html_has_waf_challenge(html_text):
         raise HTTPException(
             status_code=504,
