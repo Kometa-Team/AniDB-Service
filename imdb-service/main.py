@@ -60,6 +60,9 @@ IMDB_WEB_BASE_URL = "https://www.imdb.com"
 PARENTAL_GUIDE_LOGGING_ENABLED = (
     os.getenv("PARENTAL_GUIDE_LOGGING_ENABLED", "true").lower() == "true"
 )
+PARENTAL_BROWSER_SCREENSHOT_DIR = Path(
+    os.getenv("PARENTAL_BROWSER_SCREENSHOT_DIR", str(DATA_DIR / "parental-failures"))
+)
 
 # --- Global state ---
 last_refresh: Optional[str] = None  # ISO 8601 UTC string
@@ -111,6 +114,30 @@ def _parental_log(event: str, imdb_id: Optional[str] = None, **fields: Any) -> N
     payload = {"event": event, "imdb_id": imdb_id, **fields}
     detail = " ".join(f"{key}={value}" for key, value in payload.items() if value is not None)
     print(f"[imdb-parental] {detail}")
+
+
+async def _save_parental_failure_screenshot(
+    page: Any, imdb_id: str, attempt: int, reason: str
+) -> Optional[str]:
+    """Capture a screenshot of the browser state for parental-guide failures."""
+    try:
+        PARENTAL_BROWSER_SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        safe_reason = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in reason)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        path = PARENTAL_BROWSER_SCREENSHOT_DIR / (
+            f"{imdb_id}-attempt{attempt}-{safe_reason}-{timestamp}.png"
+        )
+        await page.screenshot(path=str(path), full_page=True)
+        _parental_log("browser_failure_screenshot_saved", imdb_id, attempt=attempt, path=str(path))
+        return str(path)
+    except Exception as e:
+        _parental_log(
+            "browser_failure_screenshot_error",
+            imdb_id,
+            attempt=attempt,
+            error=type(e).__name__,
+        )
+        return None
 
 
 def _proxy_candidates(exclude: Optional[set[str]] = None) -> list[str]:
@@ -790,6 +817,9 @@ async def _fetch_parental_guide_html_via_browser(
                         detail="Playwright parental guide fetch completed without IMDb advisory markers",
                     )
                 except PlaywrightTimeoutError as e:
+                    await _save_parental_failure_screenshot(
+                        page, imdb_id, attempt + 1, "playwright-timeout"
+                    )
                     _parental_log(
                         "browser_fetch_timeout",
                         imdb_id,
@@ -802,6 +832,9 @@ async def _fetch_parental_guide_html_via_browser(
                         status_code=504, detail=f"Playwright parental guide fetch timed out: {e}"
                     )
                 except HTTPException as e:
+                    await _save_parental_failure_screenshot(
+                        page, imdb_id, attempt + 1, f"http-{e.status_code}"
+                    )
                     _parental_log(
                         "browser_fetch_http_error",
                         imdb_id,
