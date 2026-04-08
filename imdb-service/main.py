@@ -230,6 +230,7 @@ async def _get_parental_browser_context(proxy_url: Optional[str]) -> Any:
             return existing
 
         from playwright.async_api import async_playwright
+        from playwright_stealth import Stealth
 
         if parental_browser_manager is None:
             parental_browser_manager = await async_playwright().start()
@@ -254,6 +255,7 @@ async def _get_parental_browser_context(proxy_url: Optional[str]) -> Any:
         context = await parental_browser_manager.chromium.launch_persistent_context(**launch_kwargs)
         context.set_default_navigation_timeout(PARENTAL_BROWSER_NAV_TIMEOUT_SECONDS * 1000)
         context.set_default_timeout(PARENTAL_BROWSER_SELECTOR_TIMEOUT_SECONDS * 1000)
+        await Stealth().apply_stealth_async(context)
         parental_browser_contexts[context_key] = context
         return context
 
@@ -659,7 +661,6 @@ async def _fetch_parental_guide_html_via_browser(
 
     try:
         from playwright.async_api import TimeoutError as PlaywrightTimeoutError
-        from playwright_stealth import stealth_async
     except ImportError as e:
         raise HTTPException(status_code=502, detail=f"Playwright is not installed: {e}")
 
@@ -673,7 +674,6 @@ async def _fetch_parental_guide_html_via_browser(
             for attempt in range(browser_retries):
                 page = await context.new_page()
                 try:
-                    await stealth_async(page)
                     response = await page.goto(url, wait_until="commit", timeout=timeout_ms)
                     if response and response.status == 404:
                         raise HTTPException(status_code=404, detail=f"Title {imdb_id!r} not found")
