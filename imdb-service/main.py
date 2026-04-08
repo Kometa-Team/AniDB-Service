@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import secrets
+import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta, timezone
 from html import unescape
@@ -56,6 +57,9 @@ PARENTAL_PROXY_URLS = [
 PARENTAL_PROXY_RETRY_COUNT = int(os.getenv("PARENTAL_PROXY_RETRY_COUNT", "2"))
 PARENTAL_PROXY_BAN_TTL_MINUTES = int(os.getenv("PARENTAL_PROXY_BAN_TTL_MINUTES", "30"))
 IMDB_WEB_BASE_URL = "https://www.imdb.com"
+PARENTAL_GUIDE_LOGGING_ENABLED = (
+    os.getenv("PARENTAL_GUIDE_LOGGING_ENABLED", "true").lower() == "true"
+)
 
 # --- Global state ---
 last_refresh: Optional[str] = None  # ISO 8601 UTC string
@@ -82,6 +86,31 @@ def _set_phase(phase: str) -> None:
     global current_phase, last_activity
     current_phase = phase
     last_activity = datetime.now(timezone.utc).isoformat()
+
+
+def _proxy_log_label(proxy_url: Optional[str]) -> str:
+    """Return a safe proxy label for logs without exposing credentials."""
+    if PARENTAL_DECODO_BROWSER_ENABLED:
+        return "decodo-browser"
+    if not proxy_url:
+        return "direct"
+    try:
+        parsed = urlsplit(proxy_url)
+        host = parsed.hostname or "unknown"
+        port = f":{parsed.port}" if parsed.port is not None else ""
+        return f"{parsed.scheme}://{host}{port}"
+    except Exception:
+        return "invalid-proxy"
+
+
+def _parental_log(event: str, imdb_id: Optional[str] = None, **fields: Any) -> None:
+    """Emit structured logs for the parental-guide fetch flow."""
+    if not PARENTAL_GUIDE_LOGGING_ENABLED:
+        return
+
+    payload = {"event": event, "imdb_id": imdb_id, **fields}
+    detail = " ".join(f"{key}={value}" for key, value in payload.items() if value is not None)
+    print(f"[imdb-parental] {detail}")
 
 
 def _proxy_candidates(exclude: Optional[set[str]] = None) -> list[str]:
@@ -222,11 +251,21 @@ async def _get_parental_browser_context(proxy_url: Optional[str]) -> Any:
     context_key = _parental_browser_context_key(proxy_url)
     existing = parental_browser_contexts.get(context_key)
     if existing is not None:
+        _parental_log(
+            "browser_context_reused",
+            proxy=_proxy_log_label(proxy_url),
+            context_key=context_key,
+        )
         return existing
 
     async with _get_parental_browser_lock():
         existing = parental_browser_contexts.get(context_key)
         if existing is not None:
+            _parental_log(
+                "browser_context_reused",
+                proxy=_proxy_log_label(proxy_url),
+                context_key=context_key,
+            )
             return existing
 
         from playwright.async_api import async_playwright
@@ -252,11 +291,22 @@ async def _get_parental_browser_context(proxy_url: Optional[str]) -> Any:
         if proxy_settings:
             launch_kwargs["proxy"] = proxy_settings
 
+        _parental_log(
+            "browser_context_creating",
+            proxy=_proxy_log_label(proxy_url),
+            context_key=context_key,
+            user_data_dir=str(user_data_dir),
+        )
         context = await parental_browser_manager.chromium.launch_persistent_context(**launch_kwargs)
         context.set_default_navigation_timeout(PARENTAL_BROWSER_NAV_TIMEOUT_SECONDS * 1000)
         context.set_default_timeout(PARENTAL_BROWSER_SELECTOR_TIMEOUT_SECONDS * 1000)
         await Stealth().apply_stealth_async(context)
         parental_browser_contexts[context_key] = context
+        _parental_log(
+            "browser_context_ready",
+            proxy=_proxy_log_label(proxy_url),
+            context_key=context_key,
+        )
         return context
 
 
@@ -604,8 +654,10 @@ async def _wait_for_parental_page_ready(page: Any) -> None:
     for selector in PARENTAL_PAGE_READY_SELECTORS:
         try:
             await page.wait_for_selector(selector, timeout=selector_timeout_ms)
+            _parental_log("browser_selector_ready", selector=selector)
             return
         except Exception:
+            _parental_log("browser_selector_not_ready", selector=selector)
             continue  # nosec B112
 
     html_text = cast(str, await page.content())
@@ -627,6 +679,8 @@ async def _fetch_parental_guide_html_via_http(imdb_id: str, proxy_url: Optional[
         "User-Agent": "Mozilla/5.0 (compatible; Kometa-Utilities/IMDb-Service)",
         "Accept-Language": "en-US,en;q=0.9",
     }
+    started = time.monotonic()
+    _parental_log("http_fetch_start", imdb_id, proxy=_proxy_log_label(proxy_url), url=url)
     try:
         async with httpx.AsyncClient(
             follow_redirects=True,
@@ -635,6 +689,13 @@ async def _fetch_parental_guide_html_via_http(imdb_id: str, proxy_url: Optional[
             proxy=proxy_url,
         ) as client:
             response = await client.get(url)
+            _parental_log(
+                "http_fetch_response",
+                imdb_id,
+                proxy=_proxy_log_label(proxy_url),
+                status_code=response.status_code,
+                elapsed_ms=int((time.monotonic() - started) * 1000),
+            )
             if response.status_code == 202:
                 raise HTTPException(
                     status_code=502,
@@ -643,12 +704,26 @@ async def _fetch_parental_guide_html_via_http(imdb_id: str, proxy_url: Optional[
             response.raise_for_status()
             return response.text
     except httpx.HTTPStatusError as e:
+        _parental_log(
+            "http_fetch_error_status",
+            imdb_id,
+            proxy=_proxy_log_label(proxy_url),
+            status_code=e.response.status_code,
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+        )
         status_code = 404 if e.response.status_code == 404 else 502
         raise HTTPException(
             status_code=status_code,
             detail=f"IMDb parental guide request failed with status {e.response.status_code}",
         )
     except httpx.HTTPError as e:
+        _parental_log(
+            "http_fetch_error",
+            imdb_id,
+            proxy=_proxy_log_label(proxy_url),
+            error=type(e).__name__,
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+        )
         raise HTTPException(status_code=502, detail=f"IMDb parental guide request failed: {e}")
 
 
@@ -672,8 +747,17 @@ async def _fetch_parental_guide_html_via_browser(
         async with _get_parental_browser_semaphore():
             last_error: Optional[HTTPException] = None
             for attempt in range(browser_retries):
+                started = time.monotonic()
                 page = await context.new_page()
                 try:
+                    _parental_log(
+                        "browser_fetch_start",
+                        imdb_id,
+                        proxy=_proxy_log_label(proxy_url),
+                        attempt=attempt + 1,
+                        retries=browser_retries,
+                        url=url,
+                    )
                     response = await page.goto(url, wait_until="commit", timeout=timeout_ms)
                     if response and response.status == 404:
                         raise HTTPException(status_code=404, detail=f"Title {imdb_id!r} not found")
@@ -681,8 +765,22 @@ async def _fetch_parental_guide_html_via_browser(
                     await _wait_for_parental_page_ready(page)
                     html_text = cast(str, await page.content())
                     if _html_has_parental_markers(html_text):
+                        _parental_log(
+                            "browser_fetch_success",
+                            imdb_id,
+                            proxy=_proxy_log_label(proxy_url),
+                            attempt=attempt + 1,
+                            elapsed_ms=int((time.monotonic() - started) * 1000),
+                        )
                         return html_text
                     if _html_has_waf_challenge(html_text):
+                        _parental_log(
+                            "browser_fetch_waf_challenge",
+                            imdb_id,
+                            proxy=_proxy_log_label(proxy_url),
+                            attempt=attempt + 1,
+                            elapsed_ms=int((time.monotonic() - started) * 1000),
+                        )
                         raise HTTPException(
                             status_code=504,
                             detail="Playwright parental guide fetch timed out before the page cleared the WAF challenge",
@@ -692,10 +790,27 @@ async def _fetch_parental_guide_html_via_browser(
                         detail="Playwright parental guide fetch completed without IMDb advisory markers",
                     )
                 except PlaywrightTimeoutError as e:
+                    _parental_log(
+                        "browser_fetch_timeout",
+                        imdb_id,
+                        proxy=_proxy_log_label(proxy_url),
+                        attempt=attempt + 1,
+                        error=type(e).__name__,
+                        elapsed_ms=int((time.monotonic() - started) * 1000),
+                    )
                     last_error = HTTPException(
                         status_code=504, detail=f"Playwright parental guide fetch timed out: {e}"
                     )
                 except HTTPException as e:
+                    _parental_log(
+                        "browser_fetch_http_error",
+                        imdb_id,
+                        proxy=_proxy_log_label(proxy_url),
+                        attempt=attempt + 1,
+                        status_code=e.status_code,
+                        detail=e.detail,
+                        elapsed_ms=int((time.monotonic() - started) * 1000),
+                    )
                     if e.status_code == 404:
                         raise
                     last_error = e
@@ -727,32 +842,88 @@ async def _fetch_parental_guide_html(imdb_id: str) -> str:
     attempts = max(1, PARENTAL_PROXY_RETRY_COUNT if PARENTAL_PROXY_ENABLED else 1)
     last_error: Optional[HTTPException] = None
 
-    for _ in range(attempts):
+    _parental_log(
+        "fetch_start",
+        imdb_id,
+        proxy_enabled=PARENTAL_PROXY_ENABLED,
+        attempts=attempts,
+        decodo_browser=PARENTAL_DECODO_BROWSER_ENABLED,
+    )
+
+    for attempt_index in range(attempts):
         proxy_url = _choose_parental_proxy(attempted_proxies)
         if proxy_url:
             attempted_proxies.add(proxy_url)
+        _parental_log(
+            "fetch_attempt",
+            imdb_id,
+            attempt=attempt_index + 1,
+            proxy=_proxy_log_label(proxy_url),
+        )
         try:
             html_text = await _fetch_parental_guide_html_via_http(imdb_id, proxy_url)
             if _html_has_parental_markers(html_text):
+                _parental_log(
+                    "fetch_http_success",
+                    imdb_id,
+                    attempt=attempt_index + 1,
+                    proxy=_proxy_log_label(proxy_url),
+                )
                 return html_text
+            _parental_log(
+                "fetch_http_missing_markers",
+                imdb_id,
+                attempt=attempt_index + 1,
+                proxy=_proxy_log_label(proxy_url),
+            )
         except HTTPException as e:
             if e.status_code == 404:
                 raise
             last_error = e
             if proxy_url:
                 _mark_proxy_failed(proxy_url)
+            _parental_log(
+                "fetch_http_failed",
+                imdb_id,
+                attempt=attempt_index + 1,
+                proxy=_proxy_log_label(proxy_url),
+                status_code=e.status_code,
+                detail=e.detail,
+            )
 
         try:
-            return await _fetch_parental_guide_html_via_browser(imdb_id, proxy_url)
+            html_text = await _fetch_parental_guide_html_via_browser(imdb_id, proxy_url)
+            _parental_log(
+                "fetch_browser_success",
+                imdb_id,
+                attempt=attempt_index + 1,
+                proxy=_proxy_log_label(proxy_url),
+            )
+            return html_text
         except HTTPException as e:
             if e.status_code == 404:
                 raise
             last_error = e
             if proxy_url:
                 _mark_proxy_failed(proxy_url)
+            _parental_log(
+                "fetch_browser_failed",
+                imdb_id,
+                attempt=attempt_index + 1,
+                proxy=_proxy_log_label(proxy_url),
+                status_code=e.status_code,
+                detail=e.detail,
+            )
 
     if last_error:
+        _parental_log(
+            "fetch_failed",
+            imdb_id,
+            status_code=last_error.status_code,
+            detail=last_error.detail,
+        )
         raise last_error
+    _parental_log("fetch_failed_no_response", imdb_id)
     raise HTTPException(
         status_code=502, detail="IMDb parental guide fetch failed without a usable response"
     )
@@ -1380,13 +1551,20 @@ async def get_parental_guide(
     if not _db_is_ready():
         raise HTTPException(status_code=503, detail="Service initializing")
 
+    _parental_log("endpoint_start", imdb_id, ignore_cache=ignore_cache)
     cached, expired = (None, None) if ignore_cache else await _query_parental_cache(imdb_id)
     if cached and expired is False:
+        _parental_log("endpoint_cache_hit", imdb_id)
         return {"imdb_id": imdb_id, "cached": True, "parental_guide": cached}
+    if cached:
+        _parental_log("endpoint_cache_stale", imdb_id, expired=expired)
+    else:
+        _parental_log("endpoint_cache_miss", imdb_id)
 
     html_text = await _fetch_parental_guide_html(imdb_id)
     parental = _parse_parental_guide_html(html_text)
     await _update_parental_cache(imdb_id, parental)
+    _parental_log("endpoint_cache_updated", imdb_id, categories=",".join(sorted(parental.keys())))
     return {"imdb_id": imdb_id, "cached": False, "parental_guide": parental}
 
 
