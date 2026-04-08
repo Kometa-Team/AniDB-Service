@@ -1,6 +1,7 @@
 """IMDB Service - FastAPI caching service for IMDB public datasets."""
 
 import asyncio
+import hashlib
 import json
 import os
 import secrets
@@ -10,6 +11,7 @@ from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Dict, Optional, cast
+from urllib.parse import unquote, urlsplit
 
 import aiosqlite
 import charts
@@ -27,6 +29,26 @@ MIN_VOTES_CHART = int(os.getenv("MIN_VOTES_CHART", "25000"))
 PARENTAL_GUIDE_TTL_DAYS = int(os.getenv("PARENTAL_GUIDE_TTL_DAYS", "90"))
 PARENTAL_BROWSER_ENABLED = os.getenv("PARENTAL_BROWSER_ENABLED", "true").lower() == "true"
 PARENTAL_BROWSER_TIMEOUT_SECONDS = int(os.getenv("PARENTAL_BROWSER_TIMEOUT_SECONDS", "30"))
+PARENTAL_BROWSER_NAV_TIMEOUT_SECONDS = int(os.getenv("PARENTAL_BROWSER_NAV_TIMEOUT_SECONDS", "120"))
+PARENTAL_BROWSER_SELECTOR_TIMEOUT_SECONDS = int(
+    os.getenv("PARENTAL_BROWSER_SELECTOR_TIMEOUT_SECONDS", "60")
+)
+PARENTAL_BROWSER_RETRY_COUNT = int(os.getenv("PARENTAL_BROWSER_RETRY_COUNT", "2"))
+PARENTAL_BROWSER_CONCURRENCY = int(os.getenv("PARENTAL_BROWSER_CONCURRENCY", "2"))
+PARENTAL_BROWSER_USER_DATA_DIR = Path(
+    os.getenv("PARENTAL_BROWSER_USER_DATA_DIR", str(DATA_DIR / "playwright"))
+)
+PARENTAL_DECODO_BROWSER_ENABLED = (
+    os.getenv("PARENTAL_DECODO_BROWSER_ENABLED", "false").lower() == "true"
+)
+PARENTAL_DECODO_BROWSER_HOST = os.getenv("PARENTAL_DECODO_BROWSER_HOST", "gate.decodo.com")
+PARENTAL_DECODO_BROWSER_PORT = int(os.getenv("PARENTAL_DECODO_BROWSER_PORT", "7000"))
+PARENTAL_DECODO_BROWSER_USERNAME = os.getenv("PARENTAL_DECODO_BROWSER_USERNAME", "").strip()
+PARENTAL_DECODO_BROWSER_PASSWORD = os.getenv("PARENTAL_DECODO_BROWSER_PASSWORD", "").strip()
+PARENTAL_DECODO_BROWSER_COUNTRY = os.getenv("PARENTAL_DECODO_BROWSER_COUNTRY", "").strip().lower()
+PARENTAL_DECODO_BROWSER_SESSION_DURATION_MINUTES = int(
+    os.getenv("PARENTAL_DECODO_BROWSER_SESSION_DURATION_MINUTES", "60")
+)
 PARENTAL_PROXY_ENABLED = os.getenv("PARENTAL_PROXY_ENABLED", "false").lower() == "true"
 PARENTAL_PROXY_URLS = [
     p.strip() for p in os.getenv("PARENTAL_PROXY_URLS", "").split(",") if p.strip()
@@ -43,6 +65,16 @@ download_progress: Dict[str, str] = {}  # dataset stem → pending|downloading|d
 import_progress: Dict[str, Any] = {}  # table → {status, rows}
 last_activity: Optional[str] = None  # ISO timestamp of last phase change
 proxy_health: Dict[str, datetime] = {}  # proxy URL -> cooldown-until UTC
+parental_browser_contexts: Dict[str, Any] = {}
+parental_browser_manager: Any = None
+parental_browser_lock: Optional[asyncio.Lock] = None
+parental_browser_semaphore: Optional[asyncio.Semaphore] = None
+parental_decodo_browser_session_id: Optional[str] = None
+PARENTAL_PAGE_READY_SELECTORS = (
+    'section[data-testid="advisory-nudity"]',
+    'section[data-testid^="advisory-"]',
+    "li.ipc-metadata-list-item--link",
+)
 
 
 def _set_phase(phase: str) -> None:
@@ -82,6 +114,168 @@ def _mark_proxy_failed(proxy_url: str) -> None:
     proxy_health[proxy_url] = datetime.now(timezone.utc) + timedelta(
         minutes=PARENTAL_PROXY_BAN_TTL_MINUTES
     )
+
+
+def _get_parental_browser_lock() -> asyncio.Lock:
+    """Lazily create a lock for browser-context lifecycle operations."""
+    global parental_browser_lock
+    if parental_browser_lock is None:
+        parental_browser_lock = asyncio.Lock()
+    return parental_browser_lock
+
+
+def _get_parental_browser_semaphore() -> asyncio.Semaphore:
+    """Lazily create a concurrency limit for browser fallback fetches."""
+    global parental_browser_semaphore
+    if parental_browser_semaphore is None:
+        parental_browser_semaphore = asyncio.Semaphore(PARENTAL_BROWSER_CONCURRENCY)
+    return parental_browser_semaphore
+
+
+def _parental_browser_context_key(proxy_url: Optional[str]) -> str:
+    """Map a proxy configuration to a persistent browser-context key."""
+    return _playwright_proxy_identity(proxy_url)[0]
+
+
+def _parental_browser_user_data_dir(proxy_url: Optional[str]) -> Path:
+    """Return a stable user-data dir for the direct or proxied browser context."""
+    key = _parental_browser_context_key(proxy_url)
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    label = "direct" if proxy_url is None else f"proxy-{digest}"
+    return PARENTAL_BROWSER_USER_DATA_DIR / label
+
+
+def _playwright_proxy_settings(proxy_url: Optional[str]) -> Optional[Dict[str, str]]:
+    """Convert a proxy URL into Playwright's proxy settings shape."""
+    return _playwright_proxy_identity(proxy_url)[1]
+
+
+def _get_parental_decodo_browser_session_id() -> str:
+    """Return a stable session identifier for the Decodo browser context."""
+    global parental_decodo_browser_session_id
+    if parental_decodo_browser_session_id is None:
+        parental_decodo_browser_session_id = secrets.token_hex(8)
+    return parental_decodo_browser_session_id
+
+
+def _decodo_browser_proxy_settings() -> tuple[str, Dict[str, str]]:
+    """Build sticky-session Playwright proxy settings for Decodo residential browsers."""
+    if not PARENTAL_DECODO_BROWSER_HOST:
+        raise HTTPException(status_code=502, detail="Decodo browser proxy host is not configured")
+    if not PARENTAL_DECODO_BROWSER_USERNAME or not PARENTAL_DECODO_BROWSER_PASSWORD:
+        raise HTTPException(
+            status_code=502,
+            detail="Decodo browser proxy credentials are not configured",
+        )
+
+    session_id = _get_parental_decodo_browser_session_id()
+    username_parts = [PARENTAL_DECODO_BROWSER_USERNAME]
+    if PARENTAL_DECODO_BROWSER_COUNTRY:
+        username_parts.append(f"country-{PARENTAL_DECODO_BROWSER_COUNTRY}")
+    username_parts.append(f"session-{session_id}")
+    username_parts.append(f"sessionduration-{PARENTAL_DECODO_BROWSER_SESSION_DURATION_MINUTES}")
+
+    context_key = (
+        "decodo:"
+        f"{PARENTAL_DECODO_BROWSER_HOST}:{PARENTAL_DECODO_BROWSER_PORT}:"
+        f"{PARENTAL_DECODO_BROWSER_COUNTRY or 'any'}:"
+        f"{PARENTAL_DECODO_BROWSER_SESSION_DURATION_MINUTES}:{session_id}"
+    )
+    return (
+        context_key,
+        {
+            "server": f"http://{PARENTAL_DECODO_BROWSER_HOST}:{PARENTAL_DECODO_BROWSER_PORT}",
+            "username": "-".join(username_parts),
+            "password": PARENTAL_DECODO_BROWSER_PASSWORD,
+        },
+    )
+
+
+def _playwright_proxy_identity(proxy_url: Optional[str]) -> tuple[str, Optional[Dict[str, str]]]:
+    """Return a context key and Playwright proxy settings for the browser fallback."""
+    if PARENTAL_DECODO_BROWSER_ENABLED:
+        return _decodo_browser_proxy_settings()
+
+    if not proxy_url:
+        return "__direct__", None
+
+    parsed = urlsplit(proxy_url)
+    if not parsed.scheme or not parsed.hostname:
+        raise HTTPException(status_code=502, detail=f"Invalid parental proxy URL: {proxy_url!r}")
+
+    server = f"{parsed.scheme}://{parsed.hostname}"
+    if parsed.port is not None:
+        server += f":{parsed.port}"
+
+    proxy_settings = {"server": server}
+    if parsed.username is not None:
+        proxy_settings["username"] = unquote(parsed.username)
+    if parsed.password is not None:
+        proxy_settings["password"] = unquote(parsed.password)
+    return proxy_url, proxy_settings
+
+
+async def _get_parental_browser_context(proxy_url: Optional[str]) -> Any:
+    """Get or create a long-lived persistent browser context for parental fetches."""
+    global parental_browser_manager
+
+    context_key = _parental_browser_context_key(proxy_url)
+    existing = parental_browser_contexts.get(context_key)
+    if existing is not None:
+        return existing
+
+    async with _get_parental_browser_lock():
+        existing = parental_browser_contexts.get(context_key)
+        if existing is not None:
+            return existing
+
+        from playwright.async_api import async_playwright
+
+        if parental_browser_manager is None:
+            parental_browser_manager = await async_playwright().start()
+
+        user_data_dir = _parental_browser_user_data_dir(proxy_url)
+        user_data_dir.mkdir(parents=True, exist_ok=True)
+
+        launch_kwargs: Dict[str, Any] = {
+            "user_data_dir": str(user_data_dir),
+            "headless": True,
+            "locale": "en-US",
+            "user_agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/123.0.0.0 Safari/537.36"
+            ),
+        }
+        proxy_settings = _playwright_proxy_settings(proxy_url)
+        if proxy_settings:
+            launch_kwargs["proxy"] = proxy_settings
+
+        context = await parental_browser_manager.chromium.launch_persistent_context(**launch_kwargs)
+        context.set_default_navigation_timeout(PARENTAL_BROWSER_NAV_TIMEOUT_SECONDS * 1000)
+        context.set_default_timeout(PARENTAL_BROWSER_SELECTOR_TIMEOUT_SECONDS * 1000)
+        parental_browser_contexts[context_key] = context
+        return context
+
+
+async def _close_parental_browser_contexts() -> None:
+    """Close any cached parental browser contexts and the shared Playwright manager."""
+    global parental_browser_manager
+
+    async with _get_parental_browser_lock():
+        for context in parental_browser_contexts.values():
+            try:
+                await context.close()
+            except Exception:
+                pass  # nosec B110
+        parental_browser_contexts.clear()
+
+        if parental_browser_manager is not None:
+            try:
+                await parental_browser_manager.stop()
+            except Exception:
+                pass  # nosec B110
+            parental_browser_manager = None
 
 
 async def _ensure_db_schema() -> None:
@@ -141,6 +335,7 @@ async def lifespan(app: FastAPI):
             await refresh_worker_task
         except asyncio.CancelledError:
             pass
+    await _close_parental_browser_contexts()
 
 
 async def _run_import_pipeline() -> None:
@@ -401,6 +596,28 @@ def _html_has_waf_challenge(html_text: str) -> bool:
     return any(marker in lowered for marker in waf_markers)
 
 
+async def _wait_for_parental_page_ready(page: Any) -> None:
+    """Wait until the parental-guide page exposes a stable advisory element."""
+    selector_timeout_ms = PARENTAL_BROWSER_SELECTOR_TIMEOUT_SECONDS * 1000
+    for selector in PARENTAL_PAGE_READY_SELECTORS:
+        try:
+            await page.wait_for_selector(selector, timeout=selector_timeout_ms)
+            return
+        except Exception:
+            continue  # nosec B112
+
+    html_text = cast(str, await page.content())
+    if _html_has_waf_challenge(html_text):
+        raise HTTPException(
+            status_code=504,
+            detail="Playwright parental guide fetch timed out before the page cleared the WAF challenge",
+        )
+    raise HTTPException(
+        status_code=504,
+        detail="Playwright parental guide fetch timed out before advisory content appeared",
+    )
+
+
 async def _fetch_parental_guide_html_via_http(imdb_id: str, proxy_url: Optional[str] = None) -> str:
     """Fetch the IMDb parental guide page for a title via direct HTTP."""
     url = f"{IMDB_WEB_BASE_URL}/title/{imdb_id}/parentalguide"
@@ -442,54 +659,58 @@ async def _fetch_parental_guide_html_via_browser(
 
     try:
         from playwright.async_api import TimeoutError as PlaywrightTimeoutError
-        from playwright.async_api import async_playwright
+        from playwright_stealth import stealth_async
     except ImportError as e:
         raise HTTPException(status_code=502, detail=f"Playwright is not installed: {e}")
 
     url = f"{IMDB_WEB_BASE_URL}/title/{imdb_id}/parentalguide"
-    timeout_ms = PARENTAL_BROWSER_TIMEOUT_SECONDS * 1000
+    timeout_ms = PARENTAL_BROWSER_NAV_TIMEOUT_SECONDS * 1000
+    browser_retries = max(1, PARENTAL_BROWSER_RETRY_COUNT)
+    context = await _get_parental_browser_context(proxy_url)
     try:
-        async with async_playwright() as playwright:
-            browser_kwargs: Dict[str, Any] = {"headless": True}
-            if proxy_url:
-                browser_kwargs["proxy"] = {"server": proxy_url}
-            browser = await playwright.chromium.launch(**browser_kwargs)
-            page = await browser.new_page(
-                locale="en-US",
-                user_agent="Mozilla/5.0 (compatible; Kometa-Utilities/IMDb-Service Browser Fallback)",
+        async with _get_parental_browser_semaphore():
+            last_error: Optional[HTTPException] = None
+            for attempt in range(browser_retries):
+                page = await context.new_page()
+                try:
+                    await stealth_async(page)
+                    response = await page.goto(url, wait_until="commit", timeout=timeout_ms)
+                    if response and response.status == 404:
+                        raise HTTPException(status_code=404, detail=f"Title {imdb_id!r} not found")
+
+                    await _wait_for_parental_page_ready(page)
+                    html_text = cast(str, await page.content())
+                    if _html_has_parental_markers(html_text):
+                        return html_text
+                    if _html_has_waf_challenge(html_text):
+                        raise HTTPException(
+                            status_code=504,
+                            detail="Playwright parental guide fetch timed out before the page cleared the WAF challenge",
+                        )
+                    raise HTTPException(
+                        status_code=502,
+                        detail="Playwright parental guide fetch completed without IMDb advisory markers",
+                    )
+                except PlaywrightTimeoutError as e:
+                    last_error = HTTPException(
+                        status_code=504, detail=f"Playwright parental guide fetch timed out: {e}"
+                    )
+                except HTTPException as e:
+                    if e.status_code == 404:
+                        raise
+                    last_error = e
+                finally:
+                    await page.close()
+
+                if attempt < browser_retries - 1:
+                    await asyncio.sleep(min(2 * (attempt + 1), 5))
+
+            if last_error:
+                raise last_error
+            raise HTTPException(
+                status_code=502,
+                detail="Playwright parental guide fetch failed without a usable response",
             )
-            try:
-                response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
-                if response and response.status == 404:
-                    raise HTTPException(status_code=404, detail=f"Title {imdb_id!r} not found")
-                deadline = asyncio.get_running_loop().time() + PARENTAL_BROWSER_TIMEOUT_SECONDS
-                last_html = cast(str, await page.content())
-                if _html_has_parental_markers(last_html):
-                    return last_html
-
-                while asyncio.get_running_loop().time() < deadline:
-                    if _html_has_waf_challenge(last_html):
-                        # IMDb serves an AWS WAF challenge page first; give it time to mint a token and reload.
-                        await page.wait_for_timeout(2000)
-                    else:
-                        try:
-                            await page.wait_for_load_state("domcontentloaded", timeout=2000)
-                        except PlaywrightTimeoutError:
-                            pass
-                        await page.wait_for_timeout(500)
-
-                    current_html = cast(str, await page.content())
-                    if _html_has_parental_markers(current_html):
-                        return current_html
-                    last_html = current_html
-
-                raise HTTPException(
-                    status_code=504,
-                    detail="Playwright parental guide fetch timed out before the page cleared the WAF challenge",
-                )
-            finally:
-                await page.close()
-                await browser.close()
     except PlaywrightTimeoutError as e:
         raise HTTPException(
             status_code=504, detail=f"Playwright parental guide fetch timed out: {e}"
@@ -695,12 +916,12 @@ async def search(
     if type:
         types = [t.strip() for t in type.split(",")]
         placeholders = ",".join("?" * len(types))
-        conditions.append(f"tb.titleType IN ({placeholders})")  # nosec B608
+        conditions.append(f"tb.titleType IN ({placeholders})")
         params.extend(types)
     if type_not:
         types = [t.strip() for t in type_not.split(",")]
         placeholders = ",".join("?" * len(types))
-        conditions.append(f"tb.titleType NOT IN ({placeholders})")  # nosec B608
+        conditions.append(f"tb.titleType NOT IN ({placeholders})")
         params.extend(types)
 
     if genre:
@@ -771,7 +992,7 @@ async def search(
         if not allowed:
             return {"results": [], "total": 0}
         placeholders = ",".join("?" * len(allowed))
-        conditions.append(f"tb.tconst IN ({placeholders})")  # nosec B608
+        conditions.append(f"tb.tconst IN ({placeholders})")
         params.extend(allowed)
     elif imdb_bottom is not None:
         bottom_chart = charts.chart_cache.get("lowest_rated", [])
@@ -779,7 +1000,7 @@ async def search(
         if not allowed:
             return {"results": [], "total": 0}
         placeholders = ",".join("?" * len(allowed))
-        conditions.append(f"tb.tconst IN ({placeholders})")  # nosec B608
+        conditions.append(f"tb.tconst IN ({placeholders})")
         params.extend(allowed)
 
     _add_join_filters(
@@ -803,7 +1024,7 @@ async def search(
     where_clause = "WHERE " + " AND ".join(conditions) if conditions else ""
 
     sql = (
-        f"SELECT DISTINCT tb.tconst "  # nosec B608 — sort_col/sort_dir validated against SORT_COLUMN_MAP
+        f"SELECT DISTINCT tb.tconst "  # nosec B608
         f"FROM title_basics tb "
         f"LEFT JOIN title_ratings tr ON tb.tconst = tr.tconst "
         f"{where_clause} "
@@ -844,47 +1065,73 @@ def _add_join_filters(
 ) -> None:
     """Append WHERE conditions for join-based filters using EXISTS subqueries."""
 
-    def _exists_aka(col: str, negate: bool = False) -> str:
-        op = "NOT EXISTS" if negate else "EXISTS"
-        return f"{op} (SELECT 1 FROM title_akas ta WHERE ta.tconst = tb.tconst AND ta.{col} = ?)"  # nosec B608
+    def _exists_aka_language(negate: bool = False) -> str:
+        if negate:
+            return (
+                "NOT EXISTS (SELECT 1 FROM title_akas ta "
+                "WHERE ta.tconst = tb.tconst AND ta.language = ?)"
+            )
+        return (
+            "EXISTS (SELECT 1 FROM title_akas ta "
+            "WHERE ta.tconst = tb.tconst AND ta.language = ?)"
+        )
 
-    def _exists_aka_original(col: str) -> str:
-        return f"EXISTS (SELECT 1 FROM title_akas ta WHERE ta.tconst = tb.tconst AND ta.{col} = ? AND ta.isOriginalTitle = 1)"  # nosec B608
+    def _exists_aka_region(negate: bool = False) -> str:
+        if negate:
+            return (
+                "NOT EXISTS (SELECT 1 FROM title_akas ta "
+                "WHERE ta.tconst = tb.tconst AND ta.region = ?)"
+            )
+        return (
+            "EXISTS (SELECT 1 FROM title_akas ta " "WHERE ta.tconst = tb.tconst AND ta.region = ?)"
+        )
+
+    def _exists_aka_original_language() -> str:
+        return (
+            "EXISTS (SELECT 1 FROM title_akas ta "
+            "WHERE ta.tconst = tb.tconst AND ta.language = ? AND ta.isOriginalTitle = 1)"
+        )
+
+    def _exists_aka_original_region() -> str:
+        return (
+            "EXISTS (SELECT 1 FROM title_akas ta "
+            "WHERE ta.tconst = tb.tconst AND ta.region = ? AND ta.isOriginalTitle = 1)"
+        )
 
     if language:
         for lang in language.split(","):
-            conditions.append(_exists_aka("language"))
+            conditions.append(_exists_aka_language())
             params.append(lang.strip())
     if language_any:
         langs = [lang.strip() for lang in language_any.split(",")]
-        sub = " OR ".join(_exists_aka("language") for _ in langs)
+        sub = " OR ".join(_exists_aka_language() for _ in langs)
         conditions.append(f"({sub})")
         params.extend(langs)
     if language_not:
         for lang in language_not.split(","):
-            conditions.append(_exists_aka("language", negate=True))
+            conditions.append(_exists_aka_language(negate=True))
             params.append(lang.strip())
     if language_primary:
         for lang in language_primary.split(","):
-            conditions.append(_exists_aka_original("language"))
+            conditions.append(_exists_aka_original_language())
             params.append(lang.strip())
 
     if country:
         for c in country.split(","):
-            conditions.append(_exists_aka("region"))
+            conditions.append(_exists_aka_region())
             params.append(c.strip())
     if country_any:
         cs = [c.strip() for c in country_any.split(",")]
-        sub = " OR ".join(_exists_aka("region") for _ in cs)
+        sub = " OR ".join(_exists_aka_region() for _ in cs)
         conditions.append(f"({sub})")
         params.extend(cs)
     if country_not:
         for c in country_not.split(","):
-            conditions.append(_exists_aka("region", negate=True))
+            conditions.append(_exists_aka_region(negate=True))
             params.append(c.strip())
     if country_origin:
         for c in country_origin.split(","):
-            conditions.append(_exists_aka_original("region"))
+            conditions.append(_exists_aka_original_region())
             params.append(c.strip())
 
     def _exists_cast(negate: bool = False) -> str:
@@ -1065,13 +1312,12 @@ async def get_ratings(imdb_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail="Service initializing")
 
     field = "ratings"
-    select_clause = EXTRACT_FIELD_SELECTS[field]
-    sql = (
-        f"SELECT {select_clause} "  # nosec B608 - field is validated against fixed maps
-        f"FROM title_basics tb "
-        f"LEFT JOIN title_ratings tr ON tb.tconst = tr.tconst "
-        f"WHERE tb.tconst = ?"
-    )
+    sql = """
+        SELECT tb.tconst, tb.primaryTitle, tb.titleType, tr.averageRating, tr.numVotes
+        FROM title_basics tb
+        LEFT JOIN title_ratings tr ON tb.tconst = tr.tconst
+        WHERE tb.tconst = ?
+    """
 
     try:
         async with aiosqlite.connect(DB_PATH) as db:
@@ -1099,13 +1345,12 @@ async def get_genres(imdb_id: str) -> Dict[str, Any]:
         raise HTTPException(status_code=503, detail="Service initializing")
 
     field = "genres"
-    select_clause = EXTRACT_FIELD_SELECTS[field]
-    sql = (
-        f"SELECT {select_clause} "  # nosec B608 - field is validated against fixed maps
-        f"FROM title_basics tb "
-        f"LEFT JOIN title_ratings tr ON tb.tconst = tr.tconst "
-        f"WHERE tb.tconst = ?"
-    )
+    sql = """
+        SELECT tb.tconst, tb.primaryTitle, tb.titleType, tb.genres
+        FROM title_basics tb
+        LEFT JOIN title_ratings tr ON tb.tconst = tr.tconst
+        WHERE tb.tconst = ?
+    """
 
     try:
         async with aiosqlite.connect(DB_PATH) as db:

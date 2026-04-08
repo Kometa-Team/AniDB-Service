@@ -1229,6 +1229,29 @@ def test_choose_parental_proxy_skips_cooled_down_entries(monkeypatch):
     assert proxy == "http://proxy-b"
 
 
+def test_playwright_proxy_settings_uses_decodo_sticky_browser_session(monkeypatch):
+    import main
+
+    monkeypatch.setattr(main, "PARENTAL_DECODO_BROWSER_ENABLED", True)
+    monkeypatch.setattr(main, "PARENTAL_DECODO_BROWSER_HOST", "gate.decodo.com")
+    monkeypatch.setattr(main, "PARENTAL_DECODO_BROWSER_PORT", 7000)
+    monkeypatch.setattr(main, "PARENTAL_DECODO_BROWSER_USERNAME", "user-example")
+    monkeypatch.setattr(main, "PARENTAL_DECODO_BROWSER_PASSWORD", "secret")
+    monkeypatch.setattr(main, "PARENTAL_DECODO_BROWSER_COUNTRY", "us")
+    monkeypatch.setattr(main, "PARENTAL_DECODO_BROWSER_SESSION_DURATION_MINUTES", 60)
+    monkeypatch.setattr(main, "parental_decodo_browser_session_id", None)
+
+    first_key, first_settings = main._playwright_proxy_identity(None)
+    second_key, second_settings = main._playwright_proxy_identity(None)
+
+    assert first_key == second_key
+    assert first_settings == second_settings
+    assert first_settings["server"] == "http://gate.decodo.com:7000"
+    assert first_settings["password"] == "secret"
+    assert first_settings["username"].startswith("user-example-country-us-session-")
+    assert first_settings["username"].endswith("-sessionduration-60")
+
+
 @pytest.mark.asyncio
 async def test_fetch_parental_html_retries_with_second_proxy(monkeypatch):
     from fastapi import HTTPException
