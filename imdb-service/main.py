@@ -691,17 +691,32 @@ def _html_has_no_parental_guide_notice(html_text: str) -> bool:
 async def _wait_for_parental_page_ready(page: Any) -> None:
     """Wait until the parental-guide page exposes a stable advisory element."""
     selector_timeout_ms = PARENTAL_BROWSER_SELECTOR_TIMEOUT_SECONDS * 1000
-    for selector in PARENTAL_PAGE_READY_SELECTORS:
-        try:
-            await page.wait_for_selector(selector, timeout=selector_timeout_ms)
-            _parental_log("browser_selector_ready", selector=selector)
-            return
-        except Exception:
-            _parental_log("browser_selector_not_ready", selector=selector)
-            continue  # nosec B112
+    advisory_selector = ", ".join(PARENTAL_PAGE_READY_SELECTORS)
+    try:
+        await page.wait_for_function(
+            """
+            ({ advisorySelector }) => {
+                const advisoryFound = Boolean(document.querySelector(advisorySelector));
+                const text = (document.body?.innerText || "").toLowerCase();
+                const noGuideFound =
+                    text.includes("we don't have a parents guide for this title yet") ||
+                    text.includes("we do not have a parents guide for this title yet") ||
+                    (text.includes("be the first to contribute") && text.includes("parents guide"));
+                return advisoryFound || noGuideFound;
+            }
+            """,
+            {"advisorySelector": advisory_selector},
+            timeout=selector_timeout_ms,
+        )
+    except Exception:
+        _parental_log("browser_page_not_ready", timeout_ms=selector_timeout_ms)
 
     html_text = cast(str, await page.content())
+    if _html_has_parental_markers(html_text):
+        _parental_log("browser_selector_ready", selector=advisory_selector)
+        return
     if _html_has_no_parental_guide_notice(html_text):
+        _parental_log("browser_no_guide_notice_detected")
         raise HTTPException(status_code=404, detail="No parental guide found")
     if _html_has_waf_challenge(html_text):
         raise HTTPException(
