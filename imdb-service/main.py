@@ -140,6 +140,55 @@ async def _save_parental_failure_screenshot(
         return None
 
 
+async def _save_parental_failure_artifacts(
+    page: Any, imdb_id: str, attempt: int, reason: str
+) -> None:
+    """Capture screenshot, HTML, and basic page metadata for browser failures."""
+    screenshot_path = await _save_parental_failure_screenshot(page, imdb_id, attempt, reason)
+    try:
+        PARENTAL_BROWSER_SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        safe_reason = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in reason)
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        stem = f"{imdb_id}-attempt{attempt}-{safe_reason}-{timestamp}"
+        html_path = PARENTAL_BROWSER_SCREENSHOT_DIR / f"{stem}.html"
+        meta_path = PARENTAL_BROWSER_SCREENSHOT_DIR / f"{stem}.json"
+
+        html_text = cast(str, await page.content())
+        html_path.write_text(html_text, encoding="utf-8")
+
+        metadata = {
+            "imdb_id": imdb_id,
+            "attempt": attempt,
+            "reason": reason,
+            "timestamp": timestamp,
+            "url": page.url,
+            "title": await page.title(),
+            "content_length": len(html_text),
+            "has_waf_challenge": _html_has_waf_challenge(html_text),
+            "has_no_parental_guide_notice": _html_has_no_parental_guide_notice(html_text),
+            "has_parental_markers": _html_has_parental_markers(html_text),
+            "screenshot_path": screenshot_path,
+        }
+        meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+        _parental_log(
+            "browser_failure_artifacts_saved",
+            imdb_id,
+            attempt=attempt,
+            html_path=str(html_path),
+            meta_path=str(meta_path),
+            content_length=len(html_text),
+            url=page.url,
+            title=metadata["title"],
+        )
+    except Exception as e:
+        _parental_log(
+            "browser_failure_artifacts_error",
+            imdb_id,
+            attempt=attempt,
+            error=type(e).__name__,
+        )
+
+
 def _proxy_candidates(exclude: Optional[set[str]] = None) -> list[str]:
     """Return currently healthy configured parental proxies."""
     if not PARENTAL_PROXY_ENABLED:
@@ -844,6 +893,7 @@ async def _fetch_parental_guide_html_via_browser(
                         url=url,
                     )
                     response = await page.goto(url, wait_until="commit", timeout=timeout_ms)
+                    await page.wait_for_timeout(2000)
                     if response and response.status == 404:
                         raise HTTPException(status_code=404, detail=f"Title {imdb_id!r} not found")
 
@@ -875,7 +925,7 @@ async def _fetch_parental_guide_html_via_browser(
                         detail="Playwright parental guide fetch completed without IMDb advisory markers",
                     )
                 except PlaywrightTimeoutError as e:
-                    await _save_parental_failure_screenshot(
+                    await _save_parental_failure_artifacts(
                         page, imdb_id, attempt + 1, "playwright-timeout"
                     )
                     _parental_log(
@@ -890,7 +940,7 @@ async def _fetch_parental_guide_html_via_browser(
                         status_code=504, detail=f"Playwright parental guide fetch timed out: {e}"
                     )
                 except HTTPException as e:
-                    await _save_parental_failure_screenshot(
+                    await _save_parental_failure_artifacts(
                         page, imdb_id, attempt + 1, f"http-{e.status_code}"
                     )
                     _parental_log(
