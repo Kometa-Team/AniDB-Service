@@ -690,26 +690,54 @@ def _html_has_no_parental_guide_notice(html_text: str) -> bool:
 
 async def _wait_for_parental_page_ready(page: Any) -> None:
     """Wait until the parental-guide page exposes a stable advisory element."""
-    selector_timeout_ms = PARENTAL_BROWSER_SELECTOR_TIMEOUT_SECONDS * 1000
+    from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
     advisory_selector = ", ".join(PARENTAL_PAGE_READY_SELECTORS)
-    try:
-        await page.wait_for_function(
-            """
-            ({ advisorySelector }) => {
-                const advisoryFound = Boolean(document.querySelector(advisorySelector));
-                const text = (document.body?.innerText || "").toLowerCase();
-                const noGuideFound =
-                    text.includes("we don't have a parents guide for this title yet") ||
-                    text.includes("we do not have a parents guide for this title yet") ||
-                    (text.includes("be the first to contribute") && text.includes("parents guide"));
-                return advisoryFound || noGuideFound;
-            }
-            """,
-            {"advisorySelector": advisory_selector},
-            timeout=selector_timeout_ms,
-        )
-    except Exception:
-        _parental_log("browser_page_not_ready", timeout_ms=selector_timeout_ms)
+    deadline = asyncio.get_running_loop().time() + PARENTAL_BROWSER_NAV_TIMEOUT_SECONDS
+
+    while asyncio.get_running_loop().time() < deadline:
+        html_text = cast(str, await page.content())
+        if _html_has_parental_markers(html_text):
+            _parental_log("browser_selector_ready", selector=advisory_selector)
+            return
+        if _html_has_no_parental_guide_notice(html_text):
+            _parental_log("browser_no_guide_notice_detected")
+            raise HTTPException(status_code=404, detail="No parental guide found")
+
+        remaining_ms = max(1, int((deadline - asyncio.get_running_loop().time()) * 1000))
+        slice_timeout_ms = min(2000, remaining_ms)
+        if _html_has_waf_challenge(html_text):
+            _parental_log("browser_waf_still_present", timeout_ms=slice_timeout_ms)
+            await page.wait_for_timeout(slice_timeout_ms)
+            continue
+
+        try:
+            await page.wait_for_function(
+                """
+                ({ advisorySelector }) => {
+                    const advisoryFound = Boolean(document.querySelector(advisorySelector));
+                    const text = (document.body?.innerText || "").toLowerCase();
+                    const noGuideFound =
+                        text.includes("we don't have a parents guide for this title yet") ||
+                        text.includes("we do not have a parents guide for this title yet") ||
+                        (text.includes("be the first to contribute") && text.includes("parents guide"));
+                    return advisoryFound || noGuideFound;
+                }
+                """,
+                {"advisorySelector": advisory_selector},
+                timeout=slice_timeout_ms,
+            )
+        except Exception:
+            _parental_log("browser_page_not_ready", timeout_ms=slice_timeout_ms)
+
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=min(1000, slice_timeout_ms))
+        except PlaywrightTimeoutError:
+            _parental_log(
+                "browser_load_state_wait_timed_out",
+                timeout_ms=min(1000, slice_timeout_ms),
+            )
+        await page.wait_for_timeout(250)
 
     html_text = cast(str, await page.content())
     if _html_has_parental_markers(html_text):
